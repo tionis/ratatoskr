@@ -1,0 +1,35 @@
+{
+  "name": "ratatoskr",
+  "version": "0.1.0",
+  "description": "Automerge-repo sync server with authentication and per-document permissions",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "bun run --watch src/index.ts",
+    "start": "bun run src/index.ts",
+    "test": "bun test",
+    "test:watch": "bun test --watch",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "format": "biome format --write .",
+    "typecheck": "tsc --noEmit",
+    "db:migrate": "bun run src/storage/migrate.ts"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.3.11",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/bun": "latest",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@automerge/automerge": "^3.2.2",
+    "@automerge/automerge-repo": "^2.5.1",
+    "@fastify/cookie": "^11.0.2",
+    "@fastify/cors": "^11.2.0",
+    "@fastify/websocket": "^11.2.0",
+    "better-sqlite3": "^12.6.2",
+    "fastify": "^5.7.1",
+    "openid-client": "^6.8.1",
+    "zod": "^4.3.5"
+  }
+}

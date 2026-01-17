@@ -465,13 +465,15 @@ data/
 
 | Component | Technology | Rationale |
 |-----------|------------|-----------|
-| Runtime | Node.js 20+ | Native automerge-repo integration |
+| Runtime | Bun | Fast, Node-compatible, built-in TypeScript |
 | Language | TypeScript | Type safety, ecosystem compatibility |
 | Framework | Fastify | Performance, WebSocket support |
 | Auth | openid-client | Standard OIDC library |
 | Database | better-sqlite3 | Synchronous, fast, embedded |
 | Sync | @automerge/automerge-repo | Official sync implementation |
 | WebSocket | @fastify/websocket | Fastify integration |
+| Linting | Biome | Fast, all-in-one linter and formatter |
+| Testing | bun:test | Built-in test runner |
 
 ### Project Structure
 
@@ -491,24 +493,24 @@ ratatoskr/
 │   │   └── schemas.ts        # Request/response schemas
 │   ├── sync/
 │   │   ├── handler.ts        # WebSocket handler
-│   │   ├── permissions.ts    # Permission checks
 │   │   └── adapter.ts        # Automerge network adapter
 │   ├── storage/
 │   │   ├── database.ts       # SQLite operations
 │   │   ├── documents.ts      # Document blob storage
-│   │   └── migrations/       # Schema migrations
+│   │   └── migrate.ts        # Database migrations
 │   └── lib/
+│       ├── types.ts          # Shared types
 │       ├── acl.ts            # ACL resolution
 │       ├── rate-limit.ts     # Rate limiting
 │       └── quotas.ts         # Quota enforcement
 ├── client/
-│   └── src/
-│       ├── index.ts          # Client library
-│       ├── auth.ts           # Popup auth flow
-│       └── types.ts          # Shared types
+│   └── src/                  # Client library (future)
 ├── test/
+├── docs/
+│   └── dev.md                # Development guide
 ├── package.json
 ├── tsconfig.json
+├── biome.json
 └── DESIGN.md
 ```
 
