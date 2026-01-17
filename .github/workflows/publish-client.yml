@@ -1,0 +1,61 @@
+name: Publish Client to npm
+
+on:
+  push:
+    tags:
+      - 'client-v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (e.g., 0.1.0)'
+        required: true
+        type: string
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Setup Node.js (for npm publish)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        working-directory: ./client
+        run: bun install
+
+      - name: Build client
+        working-directory: ./client
+        run: bun run build
+
+      - name: Update version from tag
+        if: startsWith(github.ref, 'refs/tags/client-v')
+        working-directory: ./client
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/client-v}"
+          npm version $VERSION --no-git-tag-version
+
+      - name: Update version from input
+        if: github.event_name == 'workflow_dispatch'
+        working-directory: ./client
+        run: |
+          npm version ${{ inputs.version }} --no-git-tag-version
+
+      - name: Publish to npm
+        working-directory: ./client
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

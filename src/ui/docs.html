@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ratatoskr Client Library Documentation</title>
+  <style>
+    :root {
+      --bg: #1a1a2e;
+      --bg-secondary: #16213e;
+      --text: #eaeaea;
+      --text-muted: #a0a0a0;
+      --accent: #4f9cf9;
+      --accent-hover: #3a8af0;
+      --border: #2a2a4a;
+      --code-bg: #0f0f1a;
+      --success: #4ade80;
+      --warning: #fbbf24;
+    }
+    
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+    }
+    
+    .container {
+      max-width: 1000px;
+      margin: 0 auto;
+      padding: 2rem;
+    }
+    
+    header {
+      text-align: center;
+      padding: 3rem 0;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 2rem;
+    }
+    
+    header h1 {
+      font-size: 2.5rem;
+      margin-bottom: 0.5rem;
+    }
+    
+    header p {
+      color: var(--text-muted);
+      font-size: 1.1rem;
+    }
+    
+    nav {
+      background: var(--bg-secondary);
+      padding: 1rem;
+      border-radius: 8px;
+      margin-bottom: 2rem;
+      position: sticky;
+      top: 1rem;
+      z-index: 100;
+    }
+    
+    nav ul {
+      list-style: none;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+      justify-content: center;
+    }
+    
+    nav a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+    
+    nav a:hover {
+      text-decoration: underline;
+    }
+    
+    section {
+      margin-bottom: 3rem;
+    }
+    
+    h2 {
+      color: var(--accent);
+      font-size: 1.8rem;
+      margin-bottom: 1rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 2px solid var(--border);
+    }
+    
+    h3 {
+      font-size: 1.3rem;
+      margin: 1.5rem 0 0.75rem;
+    }
+    
+    h4 {
+      font-size: 1.1rem;
+      margin: 1rem 0 0.5rem;
+      color: var(--text-muted);
+    }
+    
+    p {
+      margin-bottom: 1rem;
+    }
+    
+    code {
+      background: var(--code-bg);
+      padding: 0.2rem 0.4rem;
+      border-radius: 4px;
+      font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+      font-size: 0.9em;
+    }
+    
+    pre {
+      background: var(--code-bg);
+      padding: 1rem;
+      border-radius: 8px;
+      overflow-x: auto;
+      margin: 1rem 0;
+      border: 1px solid var(--border);
+    }
+    
+    pre code {
+      background: none;
+      padding: 0;
+    }
+    
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1rem 0;
+    }
+    
+    th, td {
+      text-align: left;
+      padding: 0.75rem;
+      border: 1px solid var(--border);
+    }
+    
+    th {
+      background: var(--bg-secondary);
+      color: var(--accent);
+    }
+    
+    .note {
+      background: var(--bg-secondary);
+      border-left: 4px solid var(--accent);
+      padding: 1rem;
+      margin: 1rem 0;
+      border-radius: 0 8px 8px 0;
+    }
+    
+    .warning {
+      border-left-color: var(--warning);
+    }
+    
+    .success {
+      border-left-color: var(--success);
+    }
+    
+    .badge {
+      display: inline-block;
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.8rem;
+      font-weight: bold;
+    }
+    
+    .badge-required {
+      background: #dc2626;
+      color: white;
+    }
+    
+    .badge-optional {
+      background: #6b7280;
+      color: white;
+    }
+    
+    @media (max-width: 768px) {
+      .container {
+        padding: 1rem;
+      }
+      
+      header h1 {
+        font-size: 1.8rem;
+      }
+      
+      nav ul {
+        flex-direction: column;
+        align-items: center;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🐿️ Ratatoskr Client Library</h1>
+      <p>Browser client for automerge-repo sync with authentication</p>
+    </header>
+    
+    <nav>
+      <ul>
+        <li><a href="#quickstart">Quick Start</a></li>
+        <li><a href="#installation">Installation</a></li>
+        <li><a href="#api">API Reference</a></li>
+        <li><a href="#types">Types</a></li>
+        <li><a href="#examples">Examples</a></li>
+        <li><a href="#errors">Error Handling</a></li>
+      </ul>
+    </nav>
+    
+    <section id="quickstart">
+      <h2>Quick Start</h2>
+      
+      <p>The fastest way to get started is with a direct ESM import (no build step required):</p>
+      
+      <pre><code>&lt;script type="module"&gt;
+import { RatatoskrClient } from 'https://esm.sh/@ratatoskr/client';
+
+const client = new RatatoskrClient({
+  serverUrl: window.location.origin  // Current Ratatoskr server
+});
+
+// Login via popup
+const user = await client.login();
+console.log('Logged in as:', user.name);
+
+// Get automerge repo for real-time sync
+const repo = client.getRepo();
+
+// Create a document
+await client.createDocument({
+  id: \`doc:\${crypto.randomUUID()}\`,
+  type: 'notes'
+});
+
+// List your documents
+const { owned, accessible } = await client.listDocuments();
+console.log('My documents:', owned);
+&lt;/script&gt;</code></pre>
+    </section>
+    
+    <section id="installation">
+      <h2>Installation</h2>
+      
+      <h3>Option 1: Direct ESM Import (Recommended for HTML tools)</h3>
+      <p>No installation needed. Import directly from a CDN:</p>
+      <pre><code>import { RatatoskrClient } from 'https://esm.sh/@ratatoskr/client';</code></pre>
+      
+      <h3>Option 2: npm/bun/yarn</h3>
+      <pre><code>npm install @ratatoskr/client @automerge/automerge-repo</code></pre>
+      
+      <pre><code>import { RatatoskrClient } from '@ratatoskr/client';</code></pre>
+      
+      <div class="note">
+        <strong>Peer Dependency:</strong> This library requires <code>@automerge/automerge-repo</code> as a peer dependency for real-time sync features. If you only need REST API access, you can skip it.
+      </div>
+    </section>
+    
+    <section id="api">
+      <h2>API Reference</h2>
+      
+      <h3>RatatoskrClient</h3>
+      <p>The main client class for interacting with a Ratatoskr server.</p>
+      
+      <h4>Constructor</h4>
+      <pre><code>new RatatoskrClient(options: RatatoskrClientOptions)</code></pre>
+      
+      <table>
+        <tr>
+          <th>Option</th>
+          <th>Type</th>
+          <th>Required</th>
+          <th>Default</th>
+          <th>Description</th>
+        </tr>
+        <tr>
+          <td><code>serverUrl</code></td>
+          <td><code>string</code></td>
+          <td><span class="badge badge-required">Required</span></td>
+          <td>-</td>
+          <td>Base URL of the Ratatoskr server</td>
+        </tr>
+        <tr>
+          <td><code>tokenStorageKey</code></td>
+          <td><code>string</code></td>
+          <td><span class="badge badge-optional">Optional</span></td>
+          <td><code>"ratatoskr:token"</code></td>
+          <td>localStorage key for token persistence</td>
+        </tr>
+      </table>
+      
+      <h3>Authentication Methods</h3>
+      
+      <h4><code>login(): Promise&lt;User&gt;</code></h4>
+      <p>Opens a popup for OIDC authentication. Returns user info on success.</p>
+      <pre><code>const user = await client.login();
+// { id: "alice", name: "Alice Smith", email: "alice@example.com" }</code></pre>
+      
+      <h4><code>logout(): void</code></h4>
+      <p>Clears stored credentials and disconnects.</p>
+      <pre><code>client.logout();</code></pre>
+      
+      <h4><code>isAuthenticated(): boolean</code></h4>
+      <p>Check if user has a stored token (may still be expired).</p>
+      <pre><code>if (client.isAuthenticated()) {
+  // Token exists
+}</code></pre>
+      
+      <h4><code>getUser(): User | null</code></h4>
+      <p>Get the current user object (available after login or fetchUserInfo).</p>
+      
+      <h4><code>fetchUserInfo(): Promise&lt;User&gt;</code></h4>
+      <p>Fetch/validate current user info from the server.</p>
+      <pre><code>try {
+  const user = await client.fetchUserInfo();
+  console.log('Token valid for:', user.name);
+} catch {
+  console.log('Token expired');
+  client.logout();
+}</code></pre>
+      
+      <h3>Automerge Integration</h3>
+      
+      <h4><code>getRepo(): Repo</code></h4>
+      <p>Get or create the automerge-repo instance connected to the server.</p>
+      <pre><code>const repo = client.getRepo();
+
+// Find an existing document
+const handle = repo.find('doc:abc123');
+await handle.whenReady();
+const doc = handle.docSync();
+
+// Create a new document
+const newHandle = repo.create();
+newHandle.change(doc =&gt; {
+  doc.title = 'My Document';
+  doc.items = [];
+});</code></pre>
+      
+      <h4><code>disconnect(): void</code></h4>
+      <p>Disconnect from the server and clean up the repo.</p>
+      
+      <h3>Document Management</h3>
+      
+      <h4><code>createDocument(request): Promise&lt;DocumentMetadata&gt;</code></h4>
+      <p>Create a new document on the server.</p>
+      <pre><code>const doc = await client.createDocument({
+  id: 'doc:my-unique-id',      // Required
+  type: 'notes',                // Optional
+  acl: [                        // Optional
+    { principal: 'bob', permission: 'write' },
+    { principal: 'public', permission: 'read' }
+  ],
+  expiresAt: '2025-12-31'       // Optional
+});</code></pre>
+      
+      <p><strong>Document ID Prefixes:</strong></p>
+      <table>
+        <tr><th>Prefix</th><th>Example</th><th>Description</th></tr>
+        <tr><td><code>doc:</code></td><td><code>doc:abc123</code></td><td>Regular document with full ACL support</td></tr>
+        <tr><td><code>app:</code></td><td><code>app:myapp</code></td><td>Per-user-per-app private document</td></tr>
+        <tr><td><code>eph:</code></td><td><code>eph:session</code></td><td>Ephemeral document (no persistence)</td></tr>
+      </table>
+      
+      <h4><code>listDocuments(): Promise&lt;ListDocumentsResponse&gt;</code></h4>
+      <p>List documents you own or have access to.</p>
+      <pre><code>const { owned, accessible } = await client.listDocuments();
+console.log('My documents:', owned);
+console.log('Shared with me:', accessible);</code></pre>
+      
+      <h4><code>getDocument(id): Promise&lt;DocumentMetadata&gt;</code></h4>
+      <p>Get metadata for a specific document.</p>
+      <pre><code>const doc = await client.getDocument('doc:abc123');
+console.log('Owner:', doc.owner, 'Size:', doc.size);</code></pre>
+      
+      <h4><code>deleteDocument(id): Promise&lt;void&gt;</code></h4>
+      <p>Delete a document (owner only).</p>
+      <pre><code>await client.deleteDocument('doc:abc123');</code></pre>
+      
+      <h3>Access Control</h3>
+      
+      <h4><code>getDocumentACL(id): Promise&lt;ACLEntry[]&gt;</code></h4>
+      <p>Get the access control list for a document.</p>
+      <pre><code>const acl = await client.getDocumentACL('doc:abc123');
+// [{ principal: 'bob', permission: 'write' }]</code></pre>
+      
+      <h4><code>setDocumentACL(id, acl): Promise&lt;void&gt;</code></h4>
+      <p>Update a document's ACL (owner only).</p>
+      <pre><code>await client.setDocumentACL('doc:abc123', [
+  { principal: 'bob', permission: 'write' },
+  { principal: 'charlie', permission: 'read' },
+  { principal: 'public', permission: 'read' }
+]);</code></pre>
+      
+      <p><strong>ACL Principal Types:</strong></p>
+      <table>
+        <tr><th>Principal</th><th>Description</th></tr>
+        <tr><td>User ID</td><td>Grant access to specific user</td></tr>
+        <tr><td>Document ID</td><td>Inherit ACL from another document</td></tr>
+        <tr><td><code>"public"</code></td><td>Grant access to everyone</td></tr>
+      </table>
+      
+      <p><strong>Permissions:</strong></p>
+      <table>
+        <tr><th>Permission</th><th>Allows</th></tr>
+        <tr><td><code>"read"</code></td><td>Read document content</td></tr>
+        <tr><td><code>"write"</code></td><td>Read and write document content</td></tr>
+      </table>
+      
+      <h3>API Tokens</h3>
+      
+      <h4><code>createApiToken(name, scopes?, expiresAt?): Promise&lt;{token, id}&gt;</code></h4>
+      <p>Create an API token for CLI or programmatic access.</p>
+      <pre><code>const { token, id } = await client.createApiToken(
+  'my-cli-tool',
+  ['read', 'write'],       // Optional scopes
+  '2026-01-01T00:00:00Z'   // Optional expiration
+);
+console.log('Save this token:', token);  // Only shown once!</code></pre>
+      
+      <h4><code>listApiTokens(): Promise&lt;ApiToken[]&gt;</code></h4>
+      <p>List all your API tokens (token values not returned).</p>
+      <pre><code>const tokens = await client.listApiTokens();
+for (const t of tokens) {
+  console.log(\`\${t.name} (\${t.id}) - last used: \${t.lastUsedAt}\`);
+}</code></pre>
+      
+      <h4><code>deleteApiToken(id): Promise&lt;void&gt;</code></h4>
+      <p>Revoke an API token.</p>
+      <pre><code>await client.deleteApiToken('token-id-here');</code></pre>
+    </section>
+    
+    <section id="types">
+      <h2>Types</h2>
+      
+      <pre><code>interface User {
+  id: string;
+  email?: string;
+  name?: string;
+}
+
+interface DocumentMetadata {
+  id: string;
+  owner: string;
+  type: string | null;
+  size: number;
+  expiresAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface ACLEntry {
+  principal: string;           // User ID, document ID, or "public"
+  permission: 'read' | 'write';
+}
+
+interface CreateDocumentRequest {
+  id: string;                  // Required: doc:, app:, or eph: prefix
+  type?: string;               // Optional: document type
+  acl?: ACLEntry[];            // Optional: initial ACL
+  expiresAt?: string;          // Optional: auto-delete date
+}
+
+interface ListDocumentsResponse {
+  owned: DocumentMetadata[];
+  accessible: DocumentMetadata[];
+}
+
+interface ApiToken {
+  id: string;
+  name: string;
+  scopes: string[];
+  lastUsedAt: string | null;
+  expiresAt: string | null;
+  createdAt: string;
+}</code></pre>
+    </section>
+    
+    <section id="examples">
+      <h2>Examples</h2>
+      
+      <h3>Single-File HTML Tool</h3>
+      <pre><code>&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+&lt;head&gt;
+  &lt;title&gt;My Collaborative Tool&lt;/title&gt;
+  &lt;script type="importmap"&gt;
+    {
+      "imports": {
+        "@ratatoskr/client": "https://esm.sh/@ratatoskr/client",
+        "@automerge/automerge-repo": "https://esm.sh/@automerge/automerge-repo"
+      }
+    }
+  &lt;/script&gt;
+&lt;/head&gt;
+&lt;body&gt;
+  &lt;button id="login"&gt;Login&lt;/button&gt;
+  &lt;button id="create" disabled&gt;Create Document&lt;/button&gt;
+  &lt;div id="output"&gt;&lt;/div&gt;
+
+  &lt;script type="module"&gt;
+    import { RatatoskrClient } from '@ratatoskr/client';
+    
+    const client = new RatatoskrClient({
+      serverUrl: 'https://your-server.com'
+    });
+    
+    // Check for existing session
+    if (client.isAuthenticated()) {
+      try {
+        await client.fetchUserInfo();
+        enableApp();
+      } catch {
+        client.logout();
+      }
+    }
+    
+    document.getElementById('login').onclick = async () =&gt; {
+      try {
+        const user = await client.login();
+        document.getElementById('output').textContent = \`Hello, \${user.name}!\`;
+        enableApp();
+      } catch (err) {
+        alert('Login failed: ' + err.message);
+      }
+    };
+    
+    document.getElementById('create').onclick = async () =&gt; {
+      const doc = await client.createDocument({
+        id: \`doc:\${crypto.randomUUID()}\`,
+        type: 'notes'
+      });
+      console.log('Created:', doc);
+    };
+    
+    function enableApp() {
+      document.getElementById('create').disabled = false;
+    }
+  &lt;/script&gt;
+&lt;/body&gt;
+&lt;/html&gt;</code></pre>
+      
+      <h3>Real-Time Collaboration with Automerge</h3>
+      <pre><code>import { RatatoskrClient } from '@ratatoskr/client';
+
+const client = new RatatoskrClient({
+  serverUrl: 'https://sync.example.com'
+});
+
+await client.login();
+
+// Register document on server first
+const docId = \`doc:\${crypto.randomUUID()}\`;
+await client.createDocument({ id: docId, type: 'counter' });
+
+// Get automerge repo
+const repo = client.getRepo();
+
+// Create the document content
+const handle = repo.create();
+
+// Make changes that sync in real-time
+handle.change(doc =&gt; {
+  doc.count = 0;
+});
+
+// Listen for remote changes
+handle.on('change', ({ doc }) =&gt; {
+  console.log('Count is now:', doc.count);
+});
+
+// Increment counter
+function increment() {
+  handle.change(doc =&gt; {
+    doc.count++;
+  });
+}</code></pre>
+      
+      <h3>Share a Document</h3>
+      <pre><code>// Create a document
+await client.createDocument({
+  id: 'doc:shared-notes',
+  type: 'notes'
+});
+
+// Share with specific user (write access)
+await client.setDocumentACL('doc:shared-notes', [
+  { principal: 'bob', permission: 'write' }
+]);
+
+// Make it publicly readable
+await client.setDocumentACL('doc:shared-notes', [
+  { principal: 'bob', permission: 'write' },
+  { principal: 'public', permission: 'read' }
+]);</code></pre>
+      
+      <h3>CLI Tool with API Token</h3>
+      <pre><code>// First, create a token via the web UI or API
+// Then use it directly with fetch:
+
+const RATATOSKR_URL = 'https://sync.example.com';
+const API_TOKEN = process.env.RATATOSKR_TOKEN;
+
+async function listMyDocuments() {
+  const response = await fetch(\`\${RATATOSKR_URL}/api/v1/documents\`, {
+    headers: {
+      'Authorization': \`Bearer \${API_TOKEN}\`
+    }
+  });
+  return response.json();
+}
+
+const { owned, accessible } = await listMyDocuments();
+console.log('My documents:', owned.map(d =&gt; d.id));</code></pre>
+    </section>
+    
+    <section id="errors">
+      <h2>Error Handling</h2>
+      
+      <p>All async methods throw errors on failure. Errors include descriptive messages:</p>
+      
+      <pre><code>try {
+  await client.login();
+} catch (err) {
+  if (err.message.includes('popup')) {
+    // Popup was blocked or closed by user
+    alert('Please allow popups for this site');
+  } else if (err.message.includes('timeout')) {
+    // Authentication took too long (5 minute limit)
+    alert('Authentication timed out, please try again');
+  } else if (err.message.includes('cancelled')) {
+    // User closed the popup
+    console.log('User cancelled login');
+  }
+}
+
+try {
+  await client.createDocument({ id: 'doc:test' });
+} catch (err) {
+  // err.message contains server error details
+  // e.g., "Document already exists", "Quota exceeded"
+  console.error('Failed to create document:', err.message);
+}
+
+try {
+  await client.setDocumentACL('doc:test', [...]);
+} catch (err) {
+  // e.g., "Not authorized" (not the owner)
+  console.error('Failed to update ACL:', err.message);
+}</code></pre>
+      
+      <div class="note warning">
+        <strong>Browser Compatibility:</strong> This library requires modern browsers with ES2022 support, <code>crypto.randomUUID()</code> (Chrome 92+, Firefox 95+, Safari 15.4+), and WebSocket support.
+      </div>
+    </section>
+    
+    <footer style="text-align: center; margin-top: 3rem; padding-top: 2rem; border-top: 1px solid var(--border); color: var(--text-muted);">
+      <p>
+        <a href="https://github.com/tionis/ratatoskr" style="color: var(--accent);">GitHub</a> · 
+        <a href="https://www.npmjs.com/package/@ratatoskr/client" style="color: var(--accent);">npm</a> · 
+        <a href="/" style="color: var(--accent);">Dashboard</a>
+      </p>
+      <p style="margin-top: 0.5rem;">MIT License</p>
+    </footer>
+  </div>
+</body>
+</html>

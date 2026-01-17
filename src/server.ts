@@ -35,6 +35,11 @@ export async function createServer(_config: Config) {
     return reply.redirect("/ui/index.html");
   });
 
+  // Serve docs at /docs
+  server.get("/docs", async (_request, reply) => {
+    return reply.sendFile("docs.html");
+  });
+
   // Health check
   server.get("/health", async () => {
     return { status: "ok" };

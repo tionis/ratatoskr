@@ -76,8 +76,11 @@ See [docs/dev.md](docs/dev.md) for full configuration options.
 
 ## Documentation
 
+- [Client Library](client/README.md) - Browser client library documentation
 - [Design Document](DESIGN.md) - Architecture and API specification
 - [Development Guide](docs/dev.md) - Local development setup
+
+**Live Documentation:** Every Ratatoskr server serves client library docs at `/docs` (e.g., `http://localhost:4151/docs`).
 
 ## Web UI
 
@@ -113,10 +116,33 @@ Connect to `/sync` and send an auth message (CBOR encoded):
 
 ## Client Library
 
-A browser client library is included in `client/`:
+The browser client library is available on npm as `@ratatoskr/client`.
+
+### Installation
+
+```bash
+npm install @ratatoskr/client @automerge/automerge-repo
+```
+
+### Direct ESM Import (No Build Step)
+
+```html
+<script type="module">
+import { RatatoskrClient } from 'https://esm.sh/@ratatoskr/client';
+
+const client = new RatatoskrClient({
+  serverUrl: 'https://your-ratatoskr-server.com'
+});
+
+await client.login();
+const repo = client.getRepo();
+</script>
+```
+
+### Usage
 
 ```typescript
-import { RatatoskrClient } from './client/src';
+import { RatatoskrClient } from '@ratatoskr/client';
 
 const client = new RatatoskrClient({
   serverUrl: 'http://localhost:4151',
@@ -131,7 +157,7 @@ const repo = client.getRepo();
 // Create a document (type is optional)
 await client.createDocument({
   id: 'doc:my-document',
-  type: 'notes',  // Optional
+  type: 'notes',
 });
 
 // List documents
@@ -143,17 +169,14 @@ await client.setDocumentACL('doc:my-document', [
   { principal: 'public', permission: 'read' },
 ]);
 
-// Get ACL
-const acl = await client.getDocumentACL('doc:my-document');
-
 // API tokens
 const { token, id } = await client.createApiToken('my-cli-tool', ['read', 'write']);
-const tokens = await client.listApiTokens();
-await client.deleteApiToken(id);
 
-// Access via automerge-repo
+// Real-time sync via automerge-repo
 const handle = repo.find('doc:my-document');
 ```
+
+See [client/README.md](client/README.md) for full documentation.
 
 ## Container
 

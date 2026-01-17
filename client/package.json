@@ -1,0 +1,51 @@
+{
+  "name": "@ratatoskr/client",
+  "version": "0.1.0",
+  "description": "Browser client library for Ratatoskr - automerge-repo sync server with authentication",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "bun build ./src/index.ts --outdir ./dist --target browser --format esm --external @automerge/automerge-repo --external @automerge/automerge && bun run build:types",
+    "build:types": "tsc",
+    "prepublishOnly": "bun run build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tionis/ratatoskr.git",
+    "directory": "client"
+  },
+  "keywords": [
+    "automerge",
+    "automerge-repo",
+    "sync",
+    "collaboration",
+    "crdt",
+    "real-time",
+    "websocket"
+  ],
+  "author": "tionis",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/tionis/ratatoskr/issues"
+  },
+  "homepage": "https://github.com/tionis/ratatoskr/tree/main/client#readme",
+  "peerDependencies": {
+    "@automerge/automerge-repo": "^2.0.0"
+  },
+  "devDependencies": {
+    "@automerge/automerge-repo": "^2.5.1",
+    "typescript": "^5.9.3"
+  }
+}
