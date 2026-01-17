@@ -1,7 +1,11 @@
 import { randomBytes } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { requireAuth } from "../auth/middleware.ts";
-import { getAuthorizationUrl, handleCallback } from "../auth/oidc.ts";
+import {
+  generateCodeVerifier,
+  getAuthorizationUrl,
+  handleCallback,
+} from "../auth/oidc.ts";
 import {
   createApiToken,
   createSessionToken,
@@ -32,11 +36,11 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
   // Initiate OIDC login
   fastify.get("/login", async (request, reply) => {
     const state = randomBytes(16).toString("hex");
-    const codeVerifier = randomBytes(32).toString("base64url");
+    const codeVerifier = generateCodeVerifier();
 
     pendingAuth.set(state, { codeVerifier, createdAt: Date.now() });
 
-    const authUrl = await getAuthorizationUrl(state);
+    const authUrl = await getAuthorizationUrl(state, codeVerifier);
 
     // For popup flow, return the URL
     // The client library will open this in a popup

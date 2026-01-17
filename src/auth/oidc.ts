@@ -21,16 +21,23 @@ export interface OidcUser {
 }
 
 /**
- * Generate the authorization URL for OIDC login.
+ * Generate a PKCE code verifier.
  */
-export async function getAuthorizationUrl(state: string): Promise<string> {
+export function generateCodeVerifier(): string {
+  return client.randomPKCECodeVerifier();
+}
+
+/**
+ * Generate the authorization URL for OIDC login with PKCE.
+ */
+export async function getAuthorizationUrl(
+  state: string,
+  codeVerifier: string,
+): Promise<string> {
   const oidc = await getOidcConfig();
 
-  const codeVerifier = client.randomPKCECodeVerifier();
   const codeChallenge = await client.calculatePKCECodeChallenge(codeVerifier);
 
-  // Store code verifier in state for later use
-  // In production, store in session/cookie
   const params = new URLSearchParams({
     redirect_uri: config.oidc.redirectUri,
     scope: "openid email profile",
