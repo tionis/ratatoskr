@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 const configSchema = z.object({
-  port: z.coerce.number().default(3000),
+  port: z.coerce.number().default(4151),
   host: z.string().default("0.0.0.0"),
   baseUrl: z.string().url(),
   dataDir: z.string().default("./data"),

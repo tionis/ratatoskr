@@ -47,13 +47,13 @@ bun run dev
 Create a `.env` file with:
 
 ```bash
-PORT=3000
-BASE_URL=http://localhost:3000
+PORT=4151
+BASE_URL=http://localhost:4151
 
-OIDC_ISSUER=https://auth.example.com
-OIDC_CLIENT_ID=ratatoskr
+OIDC_ISSUER=https://auth.tionis.dev
+OIDC_CLIENT_ID=juhMlePBJWwnVCxbnO5bFJJcaMIN0tVahhfqVj2Q
 OIDC_CLIENT_SECRET=your-secret
-OIDC_REDIRECT_URI=http://localhost:3000/api/v1/auth/callback
+OIDC_REDIRECT_URI=http://localhost:4151/api/v1/auth/callback
 
 DATA_DIR=./data
 ```
@@ -94,7 +94,7 @@ A browser client library is included in `client/`:
 import { RatatoskrClient } from './client/src';
 
 const client = new RatatoskrClient({
-  serverUrl: 'http://localhost:3000',
+  serverUrl: 'http://localhost:4151',
 });
 
 // Authenticate via popup

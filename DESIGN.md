@@ -551,7 +551,7 @@ Environment variables:
 
 ```bash
 # Server
-PORT=3000
+PORT=4151
 HOST=0.0.0.0
 BASE_URL=https://sync.example.com
 

@@ -38,15 +38,15 @@ Create a `.env` file in the project root:
 
 ```bash
 # Server
-PORT=3000
+PORT=4151
 HOST=0.0.0.0
-BASE_URL=http://localhost:3000
+BASE_URL=http://localhost:4151
 
 # OIDC - Configure with your Authentik instance
-OIDC_ISSUER=https://auth.example.com
-OIDC_CLIENT_ID=ratatoskr
+OIDC_ISSUER=https://auth.tionis.dev
+OIDC_CLIENT_ID=juhMlePBJWwnVCxbnO5bFJJcaMIN0tVahhfqVj2Q
 OIDC_CLIENT_SECRET=your-client-secret
-OIDC_REDIRECT_URI=http://localhost:3000/api/v1/auth/callback
+OIDC_REDIRECT_URI=http://localhost:4151/api/v1/auth/callback
 
 # Storage
 DATA_DIR=./data
@@ -135,13 +135,13 @@ See `DESIGN.md` for the full database schema.
 ### Health Check
 
 ```bash
-curl http://localhost:3000/health
+curl http://localhost:4151/health
 ```
 
 ### Create API Token (after authentication)
 
 ```bash
-curl -X POST http://localhost:3000/api/v1/auth/api-tokens \
+curl -X POST http://localhost:4151/api/v1/auth/api-tokens \
   -H "Authorization: Bearer <session-token>" \
   -H "Content-Type: application/json" \
   -d '{"name": "dev-token"}'
@@ -150,7 +150,7 @@ curl -X POST http://localhost:3000/api/v1/auth/api-tokens \
 ### List Documents
 
 ```bash
-curl http://localhost:3000/api/v1/documents \
+curl http://localhost:4151/api/v1/documents \
   -H "Authorization: Bearer <token>"
 ```
 
