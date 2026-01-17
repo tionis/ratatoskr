@@ -1,4 +1,4 @@
-FROM oven/bun:1.3-alpine AS base
+FROM docker.io/oven/bun:1.3-alpine AS base
 WORKDIR /app
 
 # Install dependencies
@@ -40,8 +40,8 @@ ENV DATA_DIR=/app/data
 
 EXPOSE 4151
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:4151/health || exit 1
+# Note: HEALTHCHECK is not supported by OCI format (Podman default)
+# Use podman healthcheck commands or orchestration-level health checks instead
+# Health endpoint available at: GET /health
 
 CMD ["bun", "run", "src/index.ts"]

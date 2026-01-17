@@ -22,10 +22,10 @@ Ratatoskr is an automerge-repo sync server with authentication and per-document 
 - [Bun](https://bun.sh/) v1.0+
 - OIDC provider (e.g., Authentik)
 
-### Using Docker
+### Using Podman
 
 ```bash
-docker run -d \
+podman run -d \
   -p 4151:4151 \
   -v ratatoskr-data:/app/data \
   -e BASE_URL=http://localhost:4151 \
@@ -155,12 +155,12 @@ await client.deleteApiToken(id);
 const handle = repo.find('doc:my-document');
 ```
 
-## Docker
+## Container
 
 ### Build locally
 
 ```bash
-docker build -t ratatoskr .
+podman build -t ratatoskr -f Containerfile .
 ```
 
 ### Environment Variables
