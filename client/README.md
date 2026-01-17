@@ -1,4 +1,4 @@
-# @ratatoskr/client
+# ratatoskr-client
 
 Browser client library for [Ratatoskr](https://github.com/tionis/ratatoskr) - an automerge-repo sync server with authentication and per-document permissions.
 
@@ -16,14 +16,14 @@ Browser client library for [Ratatoskr](https://github.com/tionis/ratatoskr) - an
 ### Installation (npm/bun/yarn)
 
 ```bash
-npm install @ratatoskr/client @automerge/automerge-repo
+npm install ratatoskr-client @automerge/automerge-repo
 ```
 
 ### Direct ESM Import (No Build Step)
 
 ```html
 <script type="module">
-  import { RatatoskrClient } from 'https://esm.sh/@ratatoskr/client';
+  import { RatatoskrClient } from 'https://esm.sh/ratatoskr-client';
   import { Repo } from 'https://esm.sh/@automerge/automerge-repo';
   
   const client = new RatatoskrClient({
@@ -53,7 +53,7 @@ npm install @ratatoskr/client @automerge/automerge-repo
   <div id="output"></div>
 
   <script type="module">
-    import { RatatoskrClient } from 'https://esm.sh/@ratatoskr/client';
+    import { RatatoskrClient } from 'https://esm.sh/ratatoskr-client';
     
     const client = new RatatoskrClient({
       serverUrl: 'https://your-server.com'
@@ -341,7 +341,7 @@ Low-level network adapter for custom automerge-repo setups.
 
 ```typescript
 import { Repo } from '@automerge/automerge-repo';
-import { RatatoskrNetworkAdapter } from '@ratatoskr/client';
+import { RatatoskrNetworkAdapter } from 'ratatoskr-client';
 
 const adapter = new RatatoskrNetworkAdapter({
   serverUrl: 'https://your-server.com',
@@ -369,7 +369,7 @@ adapter.setToken(newToken);
   <script type="importmap">
     {
       "imports": {
-        "@ratatoskr/client": "https://esm.sh/@ratatoskr/client",
+        "ratatoskr-client": "https://esm.sh/ratatoskr-client",
         "@automerge/automerge-repo": "https://esm.sh/@automerge/automerge-repo"
       }
     }
@@ -377,7 +377,7 @@ adapter.setToken(newToken);
 </head>
 <body>
   <script type="module">
-    import { RatatoskrClient } from '@ratatoskr/client';
+    import { RatatoskrClient } from 'ratatoskr-client';
     
     const client = new RatatoskrClient({
       serverUrl: 'https://sync.example.com'
@@ -413,7 +413,7 @@ adapter.setToken(newToken);
 
 ```typescript
 // src/lib/ratatoskr.ts
-import { RatatoskrClient } from '@ratatoskr/client';
+import { RatatoskrClient } from 'ratatoskr-client';
 
 export const client = new RatatoskrClient({
   serverUrl: import.meta.env.VITE_RATATOSKR_URL

@@ -116,19 +116,19 @@ Connect to `/sync` and send an auth message (CBOR encoded):
 
 ## Client Library
 
-The browser client library is available on npm as `@ratatoskr/client`.
+The browser client library is available on npm as `ratatoskr-client`.
 
 ### Installation
 
 ```bash
-npm install @ratatoskr/client @automerge/automerge-repo
+npm install ratatoskr-client @automerge/automerge-repo
 ```
 
 ### Direct ESM Import (No Build Step)
 
 ```html
 <script type="module">
-import { RatatoskrClient } from 'https://esm.sh/@ratatoskr/client';
+import { RatatoskrClient } from 'https://esm.sh/ratatoskr-client';
 
 const client = new RatatoskrClient({
   serverUrl: 'https://your-ratatoskr-server.com'
@@ -142,7 +142,7 @@ const repo = client.getRepo();
 ### Usage
 
 ```typescript
-import { RatatoskrClient } from '@ratatoskr/client';
+import { RatatoskrClient } from 'ratatoskr-client';
 
 const client = new RatatoskrClient({
   serverUrl: 'http://localhost:4151',

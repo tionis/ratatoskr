@@ -1,5 +1,5 @@
 {
-  "name": "@ratatoskr/client",
+  "name": "ratatoskr-client",
   "version": "0.1.0",
   "description": "Browser client library for Ratatoskr - automerge-repo sync server with authentication",
   "type": "module",

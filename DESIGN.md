@@ -522,7 +522,7 @@ ratatoskr/
 A lightweight client library for web applications:
 
 ```typescript
-import { Ratatoskr } from '@ratatoskr/client';
+import { Ratatoskr } from 'ratatoskr-client';
 
 const client = new Ratatoskr({
   serverUrl: 'https://sync.example.com',
