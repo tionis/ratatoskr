@@ -80,10 +80,37 @@ See [docs/dev.md](docs/dev.md) for full configuration options.
 
 ### WebSocket Sync
 
-Connect to `/sync` and send an auth message:
+Connect to `/sync` and send an auth message (CBOR encoded):
 
 ```json
 {"type": "auth", "token": "<your-token>"}
+```
+
+## Client Library
+
+A browser client library is included in `client/`:
+
+```typescript
+import { RatatoskrClient } from './client/src';
+
+const client = new RatatoskrClient({
+  serverUrl: 'http://localhost:3000',
+});
+
+// Authenticate via popup
+await client.login();
+
+// Get automerge-repo instance
+const repo = client.getRepo();
+
+// Create a document
+await client.createDocument({
+  id: 'doc:my-document',
+  type: 'com.example.myapp/note',
+});
+
+// Access via automerge-repo
+const handle = repo.find('doc:my-document');
 ```
 
 ## Development
