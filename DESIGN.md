@@ -82,11 +82,14 @@ For web applications, including single-file tools:
 
 1. Web app calls client library: `ratatoskr.login()`
 2. Popup opens to `{ratatoskr}/auth/login`
-3. User authenticates via Authentik
-4. Popup sends short-lived token to opener via `postMessage`
-5. Web app establishes WebSocket connection with token
+3. Server generates PKCE code verifier and challenge, redirects to Authentik
+4. User authenticates via Authentik
+5. Authentik redirects back with authorization code
+6. Server exchanges code for tokens using PKCE verifier
+7. Popup sends short-lived session token to opener via `postMessage`
+8. Web app establishes WebSocket connection with token
 
-The client library handles the popup flow and token management.
+The OIDC flow uses PKCE (Proof Key for Code Exchange) with S256 challenge method for security. The client library handles the popup flow and token management.
 
 #### 2. API Tokens (Secondary)
 
@@ -576,6 +579,7 @@ AUTH_RATE_LIMIT_CONNECTIONS=100
 ## Security Considerations
 
 ### Token Security
+- PKCE (S256) used for all OIDC authorization code exchanges
 - Short-lived JWTs for popup auth (1 hour expiration)
 - API tokens hashed with bcrypt before storage
 - Tokens transmitted only over TLS
