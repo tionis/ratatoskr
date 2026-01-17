@@ -555,11 +555,11 @@ PORT=4151
 HOST=0.0.0.0
 BASE_URL=https://sync.example.com
 
-# OIDC
+# OIDC (uses PKCE, client secret optional)
 OIDC_ISSUER=https://auth.example.com
 OIDC_CLIENT_ID=ratatoskr
-OIDC_CLIENT_SECRET=secret
 OIDC_REDIRECT_URI=https://sync.example.com/auth/callback
+# OIDC_CLIENT_SECRET=secret  # Optional: only for confidential clients
 
 # Storage
 DATA_DIR=/var/lib/ratatoskr

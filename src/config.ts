@@ -10,7 +10,7 @@ const configSchema = z.object({
   oidc: z.object({
     issuer: z.string().url(),
     clientId: z.string(),
-    clientSecret: z.string(),
+    clientSecret: z.string().optional(),
     redirectUri: z.string().url(),
   }),
 
