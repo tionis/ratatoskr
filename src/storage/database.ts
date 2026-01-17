@@ -1,6 +1,6 @@
+import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { Database } from "bun:sqlite";
 import type { ACLEntry, DocumentMetadata, User } from "../lib/types.ts";
 
 let db: Database;
@@ -51,7 +51,7 @@ function runMigrations(): void {
     `CREATE TABLE IF NOT EXISTS documents (
       id TEXT PRIMARY KEY,
       owner_id TEXT NOT NULL REFERENCES users(id),
-      type TEXT NOT NULL,
+      type TEXT,
       size INTEGER DEFAULT 0,
       expires_at TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -123,7 +123,7 @@ function rowToUser(row: Record<string, unknown>): User {
 export function createDocument(doc: {
   id: string;
   ownerId: string;
-  type: string;
+  type?: string;
 }): DocumentMetadata {
   const stmt = getDb().prepare(`
     INSERT INTO documents (id, owner_id, type)
@@ -131,7 +131,7 @@ export function createDocument(doc: {
     RETURNING *
   `);
 
-  const row = stmt.get(doc.id, doc.ownerId, doc.type) as Record<
+  const row = stmt.get(doc.id, doc.ownerId, doc.type ?? null) as Record<
     string,
     unknown
   >;

@@ -1,33 +1,30 @@
 import { z } from "zod";
 import { aclEntrySchema, documentIdSchema } from "../lib/types.ts";
 
+// Helper for flexible datetime parsing - accepts ISO strings with or without timezone
+const flexibleDatetime = z
+  .string()
+  .refine((val) => !Number.isNaN(Date.parse(val)), {
+    message: "Invalid date format",
+  });
+
 // Document creation
 export const createDocumentSchema = z.object({
   id: documentIdSchema,
-  type: z
-    .string()
-    .regex(
-      /^[a-zA-Z0-9.-]+\/[a-zA-Z0-9._-]+$/,
-      "Type must be URL-like, e.g., com.example.myapp/note",
-    ),
+  type: z.string().max(200).optional(),
   acl: z.array(aclEntrySchema).optional(),
-  expiresAt: z.string().datetime().optional(),
+  expiresAt: flexibleDatetime.optional(),
 });
 
 export type CreateDocumentRequest = z.infer<typeof createDocumentSchema>;
 
 // Document update
 export const updateDocumentTypeSchema = z.object({
-  type: z
-    .string()
-    .regex(
-      /^[a-zA-Z0-9.-]+\/[a-zA-Z0-9._-]+$/,
-      "Type must be URL-like, e.g., com.example.myapp/note",
-    ),
+  type: z.string().max(200),
 });
 
 export const updateDocumentExpirationSchema = z.object({
-  expiresAt: z.string().datetime().nullable(),
+  expiresAt: flexibleDatetime.nullable(),
 });
 
 export const updateDocumentAclSchema = z.object({
@@ -38,7 +35,7 @@ export const updateDocumentAclSchema = z.object({
 export const createApiTokenSchema = z.object({
   name: z.string().min(1).max(100),
   scopes: z.array(z.string()).optional(),
-  expiresAt: z.string().datetime().optional(),
+  expiresAt: flexibleDatetime.optional(),
 });
 
 export type CreateApiTokenRequest = z.infer<typeof createApiTokenSchema>;

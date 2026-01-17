@@ -421,7 +421,7 @@ CREATE TABLE api_tokens (
 CREATE TABLE documents (
   id TEXT PRIMARY KEY,           -- "doc:uuid" or "app:app-id"
   owner_id TEXT NOT NULL REFERENCES users(id),
-  type TEXT NOT NULL,            -- URL-like type identifier
+  type TEXT,                     -- Optional type identifier (max 200 chars)
   size INTEGER DEFAULT 0,
   expires_at TEXT,
   created_at TEXT NOT NULL,

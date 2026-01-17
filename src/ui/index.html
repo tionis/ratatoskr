@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ratatoskr - Document Management</title>
+  <link rel="stylesheet" href="/ui/styles.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Login Screen -->
+    <div id="login-screen" class="screen">
+      <div class="login-container">
+        <div class="logo">
+          <h1>🐿️ Ratatoskr</h1>
+          <p>Document Sync & Management</p>
+        </div>
+        <button id="login-btn" class="btn btn-primary btn-large">
+          Sign in with OIDC
+        </button>
+        <p class="login-hint">Authenticate with your identity provider to manage documents</p>
+      </div>
+    </div>
+
+    <!-- Main Dashboard -->
+    <div id="dashboard" class="screen hidden">
+      <!-- Header -->
+      <header class="header">
+        <div class="header-left">
+          <h1>🐿️ Ratatoskr</h1>
+        </div>
+        <div class="header-right">
+          <span id="user-info" class="user-info"></span>
+          <button id="logout-btn" class="btn btn-secondary btn-small">Logout</button>
+        </div>
+      </header>
+
+      <!-- Navigation -->
+      <nav class="nav">
+        <button class="nav-btn active" data-tab="documents">Documents</button>
+        <button class="nav-btn" data-tab="api-tokens">API Tokens</button>
+        <button class="nav-btn" data-tab="account">Account</button>
+      </nav>
+
+      <!-- Main Content -->
+      <main class="main-content">
+        <!-- Documents Tab -->
+        <section id="documents-tab" class="tab-content">
+          <div class="tab-header">
+            <h2>My Documents</h2>
+            <button id="create-doc-btn" class="btn btn-primary">+ Create Document</button>
+          </div>
+          
+          <div class="documents-section">
+            <h3>Owned Documents</h3>
+            <div id="owned-documents" class="documents-grid">
+              <div class="loading">Loading...</div>
+            </div>
+          </div>
+
+          <div class="documents-section">
+            <h3>Shared With Me</h3>
+            <div id="accessible-documents" class="documents-grid">
+              <div class="loading">Loading...</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- API Tokens Tab -->
+        <section id="api-tokens-tab" class="tab-content hidden">
+          <div class="tab-header">
+            <h2>API Tokens</h2>
+            <button id="create-token-btn" class="btn btn-primary">+ Create Token</button>
+          </div>
+          
+          <div id="tokens-list" class="tokens-list">
+            <div class="loading">Loading...</div>
+          </div>
+        </section>
+
+        <!-- Account Tab -->
+        <section id="account-tab" class="tab-content hidden">
+          <div class="tab-header">
+            <h2>Account</h2>
+          </div>
+          
+          <div class="account-info">
+            <div class="info-card">
+              <h3>User Information</h3>
+              <div id="account-details">
+                <div class="loading">Loading...</div>
+              </div>
+            </div>
+
+            <div class="info-card">
+              <h3>Quotas</h3>
+              <div id="quota-info">
+                <div class="loading">Loading...</div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <!-- Modals -->
+    <!-- Create Document Modal -->
+    <div id="create-doc-modal" class="modal hidden">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2>Create Document</h2>
+          <button class="modal-close">&times;</button>
+        </div>
+        <form id="create-doc-form">
+          <div class="form-group">
+            <label for="doc-id">Document ID</label>
+            <div class="input-group">
+              <select id="doc-prefix">
+                <option value="doc:">doc:</option>
+                <option value="app:">app:</option>
+              </select>
+              <input type="text" id="doc-id" placeholder="my-document-id" required>
+            </div>
+            <small>Use lowercase letters, numbers, and hyphens</small>
+          </div>
+          <div class="form-group">
+            <label for="doc-type">Type (optional)</label>
+            <input type="text" id="doc-type" placeholder="e.g., notes, project">
+          </div>
+          <div class="form-group">
+            <label for="doc-expires">Expires At (optional)</label>
+            <input type="datetime-local" id="doc-expires">
+          </div>
+          <div class="form-actions">
+            <button type="button" class="btn btn-secondary modal-cancel">Cancel</button>
+            <button type="submit" class="btn btn-primary">Create</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Edit ACL Modal -->
+    <div id="edit-acl-modal" class="modal hidden">
+      <div class="modal-content modal-large">
+        <div class="modal-header">
+          <h2>Edit Access Control</h2>
+          <button class="modal-close">&times;</button>
+        </div>
+        <div id="acl-doc-info" class="acl-doc-info"></div>
+        <div id="acl-entries" class="acl-entries">
+          <div class="loading">Loading...</div>
+        </div>
+        <div class="acl-add-entry">
+          <h4>Add Entry</h4>
+          <div class="acl-add-form">
+            <input type="text" id="acl-principal" placeholder="User ID or 'public'">
+            <select id="acl-permission">
+              <option value="read">Read</option>
+              <option value="write">Write</option>
+            </select>
+            <button id="acl-add-btn" class="btn btn-primary">Add</button>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button class="btn btn-secondary modal-cancel">Close</button>
+          <button id="acl-save-btn" class="btn btn-primary">Save Changes</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Create Token Modal -->
+    <div id="create-token-modal" class="modal hidden">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2>Create API Token</h2>
+          <button class="modal-close">&times;</button>
+        </div>
+        <form id="create-token-form">
+          <div class="form-group">
+            <label for="token-name">Token Name</label>
+            <input type="text" id="token-name" placeholder="e.g., CLI Tool" required>
+          </div>
+          <div class="form-group">
+            <label>Scopes</label>
+            <div class="checkbox-group">
+              <label class="checkbox-label">
+                <input type="checkbox" name="scope" value="read" checked>
+                Read - Access documents you have read permission for
+              </label>
+              <label class="checkbox-label">
+                <input type="checkbox" name="scope" value="write">
+                Write - Modify documents you have write permission for
+              </label>
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="token-expires">Expires At (optional)</label>
+            <input type="datetime-local" id="token-expires">
+          </div>
+          <div class="form-actions">
+            <button type="button" class="btn btn-secondary modal-cancel">Cancel</button>
+            <button type="submit" class="btn btn-primary">Create</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Token Created Modal -->
+    <div id="token-created-modal" class="modal hidden">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2>Token Created</h2>
+          <button class="modal-close">&times;</button>
+        </div>
+        <div class="token-created-content">
+          <p class="warning">⚠️ Copy this token now. You won't be able to see it again!</p>
+          <div class="token-display">
+            <code id="new-token-value"></code>
+            <button id="copy-token-btn" class="btn btn-secondary btn-small">Copy</button>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button class="btn btn-primary modal-cancel">Done</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Confirm Delete Modal -->
+    <div id="confirm-modal" class="modal hidden">
+      <div class="modal-content modal-small">
+        <div class="modal-header">
+          <h2 id="confirm-title">Confirm</h2>
+          <button class="modal-close">&times;</button>
+        </div>
+        <p id="confirm-message"></p>
+        <div class="form-actions">
+          <button class="btn btn-secondary modal-cancel">Cancel</button>
+          <button id="confirm-btn" class="btn btn-danger">Delete</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toast-container"></div>
+  </div>
+
+  <script src="/ui/app.js"></script>
+</body>
+</html>

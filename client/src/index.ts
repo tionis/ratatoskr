@@ -10,4 +10,4 @@
 export { type AuthResult, authenticate } from "./auth.ts";
 export { RatatoskrClient, type RatatoskrClientOptions } from "./client.ts";
 export { RatatoskrNetworkAdapter } from "./network-adapter.ts";
-export type { ACLEntry, DocumentMetadata, User } from "./types.ts";
+export type { ACLEntry, ApiToken, DocumentMetadata, User } from "./types.ts";

@@ -6,6 +6,7 @@ Ratatoskr is an automerge-repo sync server with authentication and per-document 
 
 - **Automerge-repo sync**: Real-time document synchronization using automerge
 - **OIDC authentication**: Integrates with any OIDC provider (e.g., Authentik)
+- **Web UI**: Built-in dashboard for managing documents, ACLs, and API tokens
 - **Per-document permissions**: Flexible ACL system with owner-based access control
 - **Multiple document types**:
   - `doc:` - Regular documents with full ACL support
@@ -21,7 +22,20 @@ Ratatoskr is an automerge-repo sync server with authentication and per-document 
 - [Bun](https://bun.sh/) v1.0+
 - OIDC provider (e.g., Authentik)
 
-### Installation
+### Using Docker
+
+```bash
+docker run -d \
+  -p 4151:4151 \
+  -v ratatoskr-data:/app/data \
+  -e BASE_URL=http://localhost:4151 \
+  -e OIDC_ISSUER=https://auth.example.com/application/o/your-app/ \
+  -e OIDC_CLIENT_ID=your-client-id \
+  -e OIDC_REDIRECT_URI=http://localhost:4151/api/v1/auth/callback \
+  ghcr.io/tionis/ratatoskr:latest
+```
+
+### From Source
 
 ```bash
 # Clone the repository
@@ -50,8 +64,9 @@ Create a `.env` file with:
 PORT=4151
 BASE_URL=http://localhost:4151
 
-OIDC_ISSUER=https://auth.tionis.dev
-OIDC_CLIENT_ID=juhMlePBJWwnVCxbnO5bFJJcaMIN0tVahhfqVj2Q
+# For Authentik, use the application-specific OIDC endpoint
+OIDC_ISSUER=https://auth.example.com/application/o/your-app/
+OIDC_CLIENT_ID=your-client-id
 OIDC_REDIRECT_URI=http://localhost:4151/api/v1/auth/callback
 
 DATA_DIR=./data
@@ -63,6 +78,17 @@ See [docs/dev.md](docs/dev.md) for full configuration options.
 
 - [Design Document](DESIGN.md) - Architecture and API specification
 - [Development Guide](docs/dev.md) - Local development setup
+
+## Web UI
+
+Ratatoskr includes a built-in web dashboard accessible at the server root URL (e.g., `http://localhost:4151/`).
+
+Features:
+- **Login via OIDC**: Authenticate using your identity provider
+- **Document Management**: View, create, and delete documents
+- **ACL Editor**: Configure access permissions for documents
+- **API Token Management**: Create and manage API tokens for CLI/programmatic access
+- **Account Overview**: View quotas and usage statistics
 
 ## API Overview
 
@@ -102,15 +128,53 @@ await client.login();
 // Get automerge-repo instance
 const repo = client.getRepo();
 
-// Create a document
+// Create a document (type is optional)
 await client.createDocument({
   id: 'doc:my-document',
-  type: 'com.example.myapp/note',
+  type: 'notes',  // Optional
 });
+
+// List documents
+const { owned, accessible } = await client.listDocuments();
+
+// Manage ACLs
+await client.setDocumentACL('doc:my-document', [
+  { principal: 'other-user', permission: 'read' },
+  { principal: 'public', permission: 'read' },
+]);
+
+// Get ACL
+const acl = await client.getDocumentACL('doc:my-document');
+
+// API tokens
+const { token, id } = await client.createApiToken('my-cli-tool', ['read', 'write']);
+const tokens = await client.listApiTokens();
+await client.deleteApiToken(id);
 
 // Access via automerge-repo
 const handle = repo.find('doc:my-document');
 ```
+
+## Docker
+
+### Build locally
+
+```bash
+docker build -t ratatoskr .
+```
+
+### Environment Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `PORT` | No | `4151` | Server port |
+| `HOST` | No | `0.0.0.0` | Server host |
+| `BASE_URL` | Yes | - | Public URL of the server |
+| `DATA_DIR` | No | `./data` | Data directory path |
+| `OIDC_ISSUER` | Yes | - | OIDC provider discovery URL |
+| `OIDC_CLIENT_ID` | Yes | - | OIDC client ID |
+| `OIDC_CLIENT_SECRET` | No | - | OIDC client secret (for confidential clients) |
+| `OIDC_REDIRECT_URI` | Yes | - | OAuth callback URL |
 
 ## Development
 

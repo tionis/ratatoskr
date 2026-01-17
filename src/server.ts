@@ -1,5 +1,7 @@
+import { join } from "node:path";
 import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
+import fastifyStatic from "@fastify/static";
 import websocket from "@fastify/websocket";
 import Fastify from "fastify";
 import { authRoutes } from "./api/auth.ts";
@@ -21,6 +23,17 @@ export async function createServer(_config: Config) {
   await server.register(cookie);
 
   await server.register(websocket);
+
+  // Serve static UI files
+  await server.register(fastifyStatic, {
+    root: join(import.meta.dir, "ui"),
+    prefix: "/ui/",
+  });
+
+  // Redirect root to UI
+  server.get("/", async (_request, reply) => {
+    return reply.redirect("/ui/index.html");
+  });
 
   // Health check
   server.get("/health", async () => {

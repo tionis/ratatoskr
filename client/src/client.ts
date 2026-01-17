@@ -17,6 +17,7 @@ import {
 import { RatatoskrNetworkAdapter } from "./network-adapter.ts";
 import type {
   ACLEntry,
+  ApiToken,
   CreateDocumentRequest,
   DocumentMetadata,
   ListDocumentsResponse,
@@ -240,6 +241,50 @@ export class RatatoskrClient {
     }
 
     return response.json();
+  }
+
+  /**
+   * List API tokens for the current user.
+   */
+  async listApiTokens(): Promise<ApiToken[]> {
+    const response = await this.fetch("/api/v1/auth/api-tokens");
+
+    if (!response.ok) {
+      throw new Error("Failed to list API tokens");
+    }
+
+    return response.json();
+  }
+
+  /**
+   * Delete an API token.
+   */
+  async deleteApiToken(id: string): Promise<void> {
+    const response = await this.fetch(`/api/v1/auth/api-tokens/${id}`, {
+      method: "DELETE",
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message ?? "Failed to delete API token");
+    }
+  }
+
+  /**
+   * Get document ACL.
+   */
+  async getDocumentACL(id: string): Promise<ACLEntry[]> {
+    const response = await this.fetch(
+      `/api/v1/documents/${encodeURIComponent(id)}/acl`,
+    );
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message ?? "Failed to get ACL");
+    }
+
+    const data = await response.json();
+    return data.acl;
   }
 
   /**

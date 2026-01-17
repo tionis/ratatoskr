@@ -86,9 +86,10 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
         pending.codeVerifier,
       );
 
-      // Create or update user
+      // Create or update user - prefer username over sub for cleaner IDs
+      const userId = oidcUser.preferredUsername || oidcUser.sub;
       const user = createUser({
-        id: oidcUser.sub,
+        id: userId,
         email: oidcUser.email,
         name: oidcUser.name,
       });

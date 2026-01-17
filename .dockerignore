@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+
+# Data
+data/
+*.db
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test
+coverage/
+.nyc_output/
+
+# Misc
+*.log
+*.md
+!README.md
+LICENSE
+.env
+.env.*
+!.env.example
+
+# Build artifacts
+dist/
+build/

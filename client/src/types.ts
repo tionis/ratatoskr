@@ -16,7 +16,7 @@ export interface ACLEntry {
 export interface DocumentMetadata {
   id: string;
   owner: string;
-  type: string;
+  type: string | null;
   size: number;
   expiresAt: string | null;
   createdAt: string;
@@ -25,7 +25,7 @@ export interface DocumentMetadata {
 
 export interface CreateDocumentRequest {
   id: string;
-  type: string;
+  type?: string;
   acl?: ACLEntry[];
   expiresAt?: string;
 }
@@ -33,4 +33,13 @@ export interface CreateDocumentRequest {
 export interface ListDocumentsResponse {
   owned: DocumentMetadata[];
   accessible: DocumentMetadata[];
+}
+
+export interface ApiToken {
+  id: string;
+  name: string;
+  scopes: string[];
+  lastUsedAt: string | null;
+  expiresAt: string | null;
+  createdAt: string;
 }

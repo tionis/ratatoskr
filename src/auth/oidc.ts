@@ -1,30 +1,43 @@
-import * as client from "openid-client";
+import * as oauth from "oauth4webapi";
 import { config } from "../config.ts";
 
-let oidcConfig: client.Configuration | null = null;
+// Cached authorization server metadata
+let authServerCache: oauth.AuthorizationServer | null = null;
+let oauthClient: oauth.Client | null = null;
 
-export async function getOidcConfig(): Promise<client.Configuration> {
-  if (!oidcConfig) {
-    oidcConfig = await client.discovery(
-      new URL(config.oidc.issuer),
-      config.oidc.clientId,
-      config.oidc.clientSecret,
-    );
+async function getAuthServer(): Promise<oauth.AuthorizationServer> {
+  if (!authServerCache) {
+    const issuerUrl = new URL(config.oidc.issuer);
+    const response = await oauth.discoveryRequest(issuerUrl);
+    authServerCache = await oauth.processDiscoveryResponse(issuerUrl, response);
   }
-  return oidcConfig;
+  return authServerCache;
+}
+
+function getClient(): oauth.Client {
+  if (!oauthClient) {
+    oauthClient = {
+      client_id: config.oidc.clientId,
+      token_endpoint_auth_method: config.oidc.clientSecret
+        ? "client_secret_post"
+        : "none",
+    };
+  }
+  return oauthClient;
 }
 
 export interface OidcUser {
   sub: string;
   email?: string;
   name?: string;
+  preferredUsername?: string;
 }
 
 /**
  * Generate a PKCE code verifier.
  */
 export function generateCodeVerifier(): string {
-  return client.randomPKCECodeVerifier();
+  return oauth.generateRandomCodeVerifier();
 }
 
 /**
@@ -34,20 +47,21 @@ export async function getAuthorizationUrl(
   state: string,
   codeVerifier: string,
 ): Promise<string> {
-  const oidc = await getOidcConfig();
+  const as = await getAuthServer();
+  const client = getClient();
 
-  const codeChallenge = await client.calculatePKCECodeChallenge(codeVerifier);
+  const codeChallenge = await oauth.calculatePKCECodeChallenge(codeVerifier);
 
-  const params = new URLSearchParams({
-    redirect_uri: config.oidc.redirectUri,
-    scope: "openid email profile",
-    state,
-    code_challenge: codeChallenge,
-    code_challenge_method: "S256",
-  });
+  const authUrl = new URL(as.authorization_endpoint!);
+  authUrl.searchParams.set("client_id", client.client_id);
+  authUrl.searchParams.set("redirect_uri", config.oidc.redirectUri);
+  authUrl.searchParams.set("response_type", "code");
+  authUrl.searchParams.set("scope", "openid email profile");
+  authUrl.searchParams.set("state", state);
+  authUrl.searchParams.set("code_challenge", codeChallenge);
+  authUrl.searchParams.set("code_challenge_method", "S256");
 
-  const url = client.buildAuthorizationUrl(oidc, params);
-  return url.href;
+  return authUrl.href;
 }
 
 /**
@@ -58,14 +72,37 @@ export async function handleCallback(
   expectedState: string,
   codeVerifier: string,
 ): Promise<OidcUser> {
-  const oidc = await getOidcConfig();
+  const as = await getAuthServer();
+  const client = getClient();
 
-  const tokens = await client.authorizationCodeGrant(oidc, callbackUrl, {
-    pkceCodeVerifier: codeVerifier,
+  // Validate the callback parameters - throws AuthorizationResponseError on OAuth errors
+  const params = oauth.validateAuthResponse(
+    as,
+    client,
+    callbackUrl,
     expectedState,
-  });
+  );
 
-  const claims = tokens.claims();
+  // Exchange code for tokens - throws ResponseBodyError on OAuth errors
+  const response = await oauth.authorizationCodeGrantRequest(
+    as,
+    client,
+    config.oidc.clientSecret
+      ? oauth.ClientSecretPost(config.oidc.clientSecret)
+      : oauth.None(),
+    params,
+    config.oidc.redirectUri,
+    codeVerifier,
+  );
+
+  const result = await oauth.processAuthorizationCodeResponse(
+    as,
+    client,
+    response,
+  );
+
+  // Get claims from ID token
+  const claims = oauth.getValidatedIdTokenClaims(result);
   if (!claims) {
     throw new Error("No claims in token response");
   }
@@ -74,5 +111,6 @@ export async function handleCallback(
     sub: claims.sub,
     email: claims.email as string | undefined,
     name: claims.name as string | undefined,
+    preferredUsername: claims.preferred_username as string | undefined,
   };
 }
