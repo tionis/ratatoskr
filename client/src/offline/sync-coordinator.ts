@@ -6,9 +6,19 @@
  */
 
 import type { Repo } from "@automerge/automerge-repo";
-import { ConnectivityManager, type ConnectivityState } from "./connectivity-manager.ts";
-import { DocumentStatusTracker, type DocumentSyncStatus, type DocumentStatusEntry } from "./document-status-tracker.ts";
-import { PendingOperationsQueue, type PendingOperation } from "./pending-operations-queue.ts";
+import {
+  ConnectivityManager,
+  type ConnectivityState,
+} from "./connectivity-manager.ts";
+import {
+  type DocumentStatusEntry,
+  DocumentStatusTracker,
+  type DocumentSyncStatus,
+} from "./document-status-tracker.ts";
+import {
+  type PendingOperation,
+  PendingOperationsQueue,
+} from "./pending-operations-queue.ts";
 
 export interface SyncCoordinatorOptions {
   serverUrl: string;
@@ -97,7 +107,7 @@ export class SyncCoordinator {
    */
   async createDocumentOffline<T extends Record<string, unknown>>(
     initialValue: T,
-    options: { type?: string; expiresAt?: string } = {}
+    options: { type?: string; expiresAt?: string } = {},
   ): Promise<string> {
     const repo = this.getRepo();
     if (!repo) {
@@ -135,7 +145,7 @@ export class SyncCoordinator {
    * Process a pending operation (called by queue).
    */
   private async processOperation(
-    operation: PendingOperation
+    operation: PendingOperation,
   ): Promise<{ success: boolean; error?: string }> {
     const token = this.getToken();
     if (!token) {
@@ -147,14 +157,17 @@ export class SyncCoordinator {
       return this.registerDocument(operation);
     }
 
-    return { success: false, error: `Unknown operation type: ${operation.type}` };
+    return {
+      success: false,
+      error: `Unknown operation type: ${operation.type}`,
+    };
   }
 
   /**
    * Register a document on the server.
    */
   private async registerDocument(
-    operation: PendingOperation
+    operation: PendingOperation,
   ): Promise<{ success: boolean; error?: string }> {
     const token = this.getToken();
     if (!token) {
@@ -205,7 +218,8 @@ export class SyncCoordinator {
         error: errorBody.message || `Server error: ${response.status}`,
       };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Network error";
+      const errorMessage =
+        error instanceof Error ? error.message : "Network error";
       await this.statusTracker.setStatus(operation.documentId, "local", {
         error: errorMessage,
       });
@@ -229,7 +243,10 @@ export class SyncCoordinator {
   /**
    * Process all pending operations.
    */
-  async processPendingOperations(): Promise<{ processed: number; failed: number }> {
+  async processPendingOperations(): Promise<{
+    processed: number;
+    failed: number;
+  }> {
     if (!this.connectivity.isOnline()) {
       return { processed: 0, failed: 0 };
     }
@@ -252,7 +269,8 @@ export class SyncCoordinator {
 
       return result;
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Sync error";
+      const errorMessage =
+        error instanceof Error ? error.message : "Sync error";
       this.emit({ type: "sync:error", error: errorMessage });
       return { processed: 0, failed: 0 };
     }
@@ -261,7 +279,9 @@ export class SyncCoordinator {
   /**
    * Get document sync status.
    */
-  async getDocumentSyncStatus(documentId: string): Promise<DocumentStatusEntry | undefined> {
+  async getDocumentSyncStatus(
+    documentId: string,
+  ): Promise<DocumentStatusEntry | undefined> {
     return this.statusTracker.getStatus(documentId);
   }
 

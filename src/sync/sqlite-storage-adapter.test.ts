@@ -187,7 +187,9 @@ describe("SqliteStorageAdapter", () => {
       await adapter.removeRange(["doc:123"]);
 
       expect(await adapter.load(["doc:123", "snapshot", "a"])).toBeUndefined();
-      expect(await adapter.load(["doc:123", "incremental", "b"])).toBeUndefined();
+      expect(
+        await adapter.load(["doc:123", "incremental", "b"]),
+      ).toBeUndefined();
       expect(await adapter.load(["doc:456", "snapshot", "c"])).toEqual(
         new Uint8Array([3]),
       );

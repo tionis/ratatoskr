@@ -17,7 +17,7 @@ export interface DocumentStatusEntry {
 
 export type DocumentStatusListener = (
   documentId: string,
-  status: DocumentStatusEntry
+  status: DocumentStatusEntry,
 ) => void;
 
 const DB_NAME = "ratatoskr";
@@ -45,7 +45,9 @@ export class DocumentStatusTracker {
       const request = indexedDB.open(this.dbName, DB_VERSION);
 
       request.onerror = () => {
-        reject(new Error(`Failed to open IndexedDB: ${request.error?.message}`));
+        reject(
+          new Error(`Failed to open IndexedDB: ${request.error?.message}`),
+        );
       };
 
       request.onupgradeneeded = (event) => {
@@ -58,14 +60,20 @@ export class DocumentStatusTracker {
 
         // Create document status store
         if (!db.objectStoreNames.contains(STATUS_STORE)) {
-          const store = db.createObjectStore(STATUS_STORE, { keyPath: "documentId" });
+          const store = db.createObjectStore(STATUS_STORE, {
+            keyPath: "documentId",
+          });
           store.createIndex("status", "status", { unique: false });
-          store.createIndex("serverRegistered", "serverRegistered", { unique: false });
+          store.createIndex("serverRegistered", "serverRegistered", {
+            unique: false,
+          });
         }
 
         // Create pending operations store (for queue)
         if (!db.objectStoreNames.contains("pending_operations")) {
-          const store = db.createObjectStore("pending_operations", { keyPath: "id" });
+          const store = db.createObjectStore("pending_operations", {
+            keyPath: "id",
+          });
           store.createIndex("createdAt", "createdAt", { unique: false });
           store.createIndex("type", "type", { unique: false });
         }
@@ -86,7 +94,7 @@ export class DocumentStatusTracker {
   async setStatus(
     documentId: string,
     status: DocumentSyncStatus,
-    options: Partial<Omit<DocumentStatusEntry, "documentId" | "status">> = {}
+    options: Partial<Omit<DocumentStatusEntry, "documentId" | "status">> = {},
   ): Promise<void> {
     const db = await this.getDb();
     const existing = await this.getStatus(documentId);
@@ -94,7 +102,8 @@ export class DocumentStatusTracker {
     const entry: DocumentStatusEntry = {
       documentId,
       status,
-      serverRegistered: options.serverRegistered ?? existing?.serverRegistered ?? false,
+      serverRegistered:
+        options.serverRegistered ?? existing?.serverRegistered ?? false,
       createdAt: existing?.createdAt ?? new Date().toISOString(),
       lastSyncAttempt: options.lastSyncAttempt ?? existing?.lastSyncAttempt,
       error: options.error,
@@ -106,7 +115,9 @@ export class DocumentStatusTracker {
       const request = store.put(entry);
 
       request.onerror = () => {
-        reject(new Error(`Failed to set document status: ${request.error?.message}`));
+        reject(
+          new Error(`Failed to set document status: ${request.error?.message}`),
+        );
       };
 
       request.onsuccess = () => {
@@ -120,7 +131,9 @@ export class DocumentStatusTracker {
   /**
    * Get document status.
    */
-  async getStatus(documentId: string): Promise<DocumentStatusEntry | undefined> {
+  async getStatus(
+    documentId: string,
+  ): Promise<DocumentStatusEntry | undefined> {
     // Check cache first
     if (this.cache.has(documentId)) {
       return this.cache.get(documentId);
@@ -134,7 +147,9 @@ export class DocumentStatusTracker {
       const request = store.get(documentId);
 
       request.onerror = () => {
-        reject(new Error(`Failed to get document status: ${request.error?.message}`));
+        reject(
+          new Error(`Failed to get document status: ${request.error?.message}`),
+        );
       };
 
       request.onsuccess = () => {
@@ -157,7 +172,9 @@ export class DocumentStatusTracker {
   /**
    * Get all documents with a specific status.
    */
-  async getByStatus(status: DocumentSyncStatus): Promise<DocumentStatusEntry[]> {
+  async getByStatus(
+    status: DocumentSyncStatus,
+  ): Promise<DocumentStatusEntry[]> {
     const db = await this.getDb();
 
     return new Promise((resolve, reject) => {
@@ -167,7 +184,11 @@ export class DocumentStatusTracker {
       const request = index.getAll(status);
 
       request.onerror = () => {
-        reject(new Error(`Failed to get documents by status: ${request.error?.message}`));
+        reject(
+          new Error(
+            `Failed to get documents by status: ${request.error?.message}`,
+          ),
+        );
       };
 
       request.onsuccess = () => {
@@ -194,7 +215,11 @@ export class DocumentStatusTracker {
       const results: DocumentStatusEntry[] = [];
 
       request.onerror = () => {
-        reject(new Error(`Failed to get unregistered documents: ${request.error?.message}`));
+        reject(
+          new Error(
+            `Failed to get unregistered documents: ${request.error?.message}`,
+          ),
+        );
       };
 
       request.onsuccess = (event) => {
@@ -225,7 +250,11 @@ export class DocumentStatusTracker {
       const request = store.delete(documentId);
 
       request.onerror = () => {
-        reject(new Error(`Failed to remove document status: ${request.error?.message}`));
+        reject(
+          new Error(
+            `Failed to remove document status: ${request.error?.message}`,
+          ),
+        );
       };
 
       request.onsuccess = () => {
@@ -235,7 +264,10 @@ export class DocumentStatusTracker {
     });
   }
 
-  private notifyListeners(documentId: string, entry: DocumentStatusEntry): void {
+  private notifyListeners(
+    documentId: string,
+    entry: DocumentStatusEntry,
+  ): void {
     for (const listener of this.listeners) {
       try {
         listener(documentId, entry);

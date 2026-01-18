@@ -20,10 +20,9 @@ import {
 } from "./auth.ts";
 import { RatatoskrNetworkAdapter } from "./network-adapter.ts";
 import {
-  SyncCoordinator,
   type ConnectivityState,
   type DocumentStatusEntry,
-  type SyncEvent,
+  SyncCoordinator,
   type SyncEventListener,
 } from "./offline/index.ts";
 import { IndexedDBStorageAdapter } from "./storage/indexeddb-storage-adapter.ts";
@@ -425,7 +424,7 @@ export class RatatoskrClient {
    */
   async createDocumentOffline<T extends Record<string, unknown>>(
     initialValue: T,
-    options: { type?: string; expiresAt?: string } = {}
+    options: { type?: string; expiresAt?: string } = {},
   ): Promise<string> {
     if (!this.syncCoordinator) {
       throw new Error("Offline support is not enabled");
@@ -443,7 +442,7 @@ export class RatatoskrClient {
    * @returns Document status or undefined if not tracked
    */
   async getDocumentSyncStatus(
-    documentId: string
+    documentId: string,
   ): Promise<DocumentStatusEntry | undefined> {
     if (!this.syncCoordinator) {
       return undefined;

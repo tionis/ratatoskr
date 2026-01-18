@@ -23,7 +23,7 @@ export interface PendingOperation {
 }
 
 export type OperationProcessor = (
-  operation: PendingOperation
+  operation: PendingOperation,
 ) => Promise<{ success: boolean; error?: string }>;
 
 const DB_NAME = "ratatoskr";
@@ -55,7 +55,9 @@ export class PendingOperationsQueue {
       const request = indexedDB.open(this.dbName, DB_VERSION);
 
       request.onerror = () => {
-        reject(new Error(`Failed to open IndexedDB: ${request.error?.message}`));
+        reject(
+          new Error(`Failed to open IndexedDB: ${request.error?.message}`),
+        );
       };
 
       request.onupgradeneeded = (event) => {
@@ -68,9 +70,13 @@ export class PendingOperationsQueue {
 
         // Create document status store
         if (!db.objectStoreNames.contains("document_status")) {
-          const store = db.createObjectStore("document_status", { keyPath: "documentId" });
+          const store = db.createObjectStore("document_status", {
+            keyPath: "documentId",
+          });
           store.createIndex("status", "status", { unique: false });
-          store.createIndex("serverRegistered", "serverRegistered", { unique: false });
+          store.createIndex("serverRegistered", "serverRegistered", {
+            unique: false,
+          });
         }
 
         // Create pending operations store
@@ -102,7 +108,7 @@ export class PendingOperationsQueue {
    */
   async enqueueDocumentRegistration(
     documentId: string,
-    options: { type?: string; expiresAt?: string } = {}
+    options: { type?: string; expiresAt?: string } = {},
   ): Promise<void> {
     const operation: PendingOperation = {
       id: crypto.randomUUID(),
@@ -124,7 +130,9 @@ export class PendingOperationsQueue {
       const request = store.add(operation);
 
       request.onerror = () => {
-        reject(new Error(`Failed to enqueue operation: ${request.error?.message}`));
+        reject(
+          new Error(`Failed to enqueue operation: ${request.error?.message}`),
+        );
       };
 
       request.onsuccess = () => {
@@ -146,7 +154,11 @@ export class PendingOperationsQueue {
       const request = index.getAll();
 
       request.onerror = () => {
-        reject(new Error(`Failed to get pending operations: ${request.error?.message}`));
+        reject(
+          new Error(
+            `Failed to get pending operations: ${request.error?.message}`,
+          ),
+        );
       };
 
       request.onsuccess = () => {
@@ -181,7 +193,9 @@ export class PendingOperationsQueue {
       const request = store.put(operation);
 
       request.onerror = () => {
-        reject(new Error(`Failed to update operation: ${request.error?.message}`));
+        reject(
+          new Error(`Failed to update operation: ${request.error?.message}`),
+        );
       };
 
       request.onsuccess = () => {
@@ -202,7 +216,9 @@ export class PendingOperationsQueue {
       const request = store.delete(operationId);
 
       request.onerror = () => {
-        reject(new Error(`Failed to remove operation: ${request.error?.message}`));
+        reject(
+          new Error(`Failed to remove operation: ${request.error?.message}`),
+        );
       };
 
       request.onsuccess = () => {
@@ -228,8 +244,8 @@ export class PendingOperationsQueue {
    */
   private calculateNextRetry(attempts: number): string {
     const delay = Math.min(
-      BASE_RETRY_DELAY_MS * Math.pow(2, attempts),
-      MAX_RETRY_DELAY_MS
+      BASE_RETRY_DELAY_MS * 2 ** attempts,
+      MAX_RETRY_DELAY_MS,
     );
     const jitter = Math.random() * delay * 0.1; // 10% jitter
     return new Date(Date.now() + delay + jitter).toISOString();
@@ -278,7 +294,8 @@ export class PendingOperationsQueue {
             failed++;
           }
         } catch (error) {
-          operation.error = error instanceof Error ? error.message : "Unknown error";
+          operation.error =
+            error instanceof Error ? error.message : "Unknown error";
           operation.nextRetry = this.calculateNextRetry(operation.attempts);
           await this.updateOperation(operation);
           failed++;

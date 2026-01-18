@@ -50,6 +50,10 @@
       margin-bottom: 0.5rem;
     }
 
+    p {
+      margin-bottom: 1rem;
+    }
+
     header p {
       color: var(--text-muted);
       font-size: 1.1rem;
@@ -105,10 +109,6 @@
       color: var(--text-muted);
     }
 
-    p {
-      margin-bottom: 1rem;
-    }
-
     code {
       background: var(--code-bg);
       padding: 0.2rem 0.4rem;
@@ -118,12 +118,12 @@
     }
 
     pre {
-      background: var(--code-bg) !important;
-      padding: 1rem !important;
-      border-radius: 8px !important;
+      background: var(--code-bg);
+      padding: 1rem;
+      border-radius: 8px;
       overflow-x: auto;
-      margin: 1rem 0 !important;
-      border: 1px solid var(--border) !important;
+      margin: 1rem 0;
+      border: 1px solid var(--border);
     }
 
     pre code {
@@ -133,12 +133,12 @@
 
     /* Prism overrides for dark theme consistency */
     pre[class*="language-"] {
-      background: var(--code-bg) !important;
+      background: var(--code-bg);
     }
 
     code[class*="language-"],
     pre[class*="language-"] {
-      text-shadow: none !important;
+      text-shadow: none;
     }
 
     table {

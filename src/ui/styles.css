@@ -41,7 +41,7 @@ body {
 
 /* Utilities */
 .hidden {
-  display: none !important;
+  display: none;
 }
 
 .loading {

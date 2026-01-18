@@ -33,7 +33,9 @@ export class IndexedDBStorageAdapter implements StorageAdapterInterface {
       const request = indexedDB.open(this.dbName, DB_VERSION);
 
       request.onerror = () => {
-        reject(new Error(`Failed to open IndexedDB: ${request.error?.message}`));
+        reject(
+          new Error(`Failed to open IndexedDB: ${request.error?.message}`),
+        );
       };
 
       request.onupgradeneeded = (event) => {
@@ -78,12 +80,14 @@ export class IndexedDBStorageAdapter implements StorageAdapterInterface {
       const request = store.get(keyStr);
 
       request.onerror = () => {
-        reject(new Error(`Failed to load from IndexedDB: ${request.error?.message}`));
+        reject(
+          new Error(`Failed to load from IndexedDB: ${request.error?.message}`),
+        );
       };
 
       request.onsuccess = () => {
         const result = request.result;
-        if (result && result.data) {
+        if (result?.data) {
           resolve(new Uint8Array(result.data));
         } else {
           resolve(undefined);
@@ -102,7 +106,9 @@ export class IndexedDBStorageAdapter implements StorageAdapterInterface {
       const request = store.put({ key: keyStr, data: Array.from(data) });
 
       request.onerror = () => {
-        reject(new Error(`Failed to save to IndexedDB: ${request.error?.message}`));
+        reject(
+          new Error(`Failed to save to IndexedDB: ${request.error?.message}`),
+        );
       };
 
       request.onsuccess = () => {
@@ -121,7 +127,11 @@ export class IndexedDBStorageAdapter implements StorageAdapterInterface {
       const request = store.delete(keyStr);
 
       request.onerror = () => {
-        reject(new Error(`Failed to remove from IndexedDB: ${request.error?.message}`));
+        reject(
+          new Error(
+            `Failed to remove from IndexedDB: ${request.error?.message}`,
+          ),
+        );
       };
 
       request.onsuccess = () => {
@@ -141,7 +151,11 @@ export class IndexedDBStorageAdapter implements StorageAdapterInterface {
       const results: Chunk[] = [];
 
       request.onerror = () => {
-        reject(new Error(`Failed to load range from IndexedDB: ${request.error?.message}`));
+        reject(
+          new Error(
+            `Failed to load range from IndexedDB: ${request.error?.message}`,
+          ),
+        );
       };
 
       request.onsuccess = (event) => {
@@ -149,7 +163,10 @@ export class IndexedDBStorageAdapter implements StorageAdapterInterface {
         if (cursor) {
           const storedKey = cursor.value.key as string;
           // Check if the key starts with the prefix
-          if (storedKey === prefixStr || storedKey.startsWith(prefixStr + "\x00")) {
+          if (
+            storedKey === prefixStr ||
+            storedKey.startsWith(`${prefixStr}\x00`)
+          ) {
             results.push({
               key: this.stringToKey(storedKey),
               data: new Uint8Array(cursor.value.data),
@@ -174,25 +191,34 @@ export class IndexedDBStorageAdapter implements StorageAdapterInterface {
       const deletePromises: Promise<void>[] = [];
 
       request.onerror = () => {
-        reject(new Error(`Failed to remove range from IndexedDB: ${request.error?.message}`));
+        reject(
+          new Error(
+            `Failed to remove range from IndexedDB: ${request.error?.message}`,
+          ),
+        );
       };
 
       request.onsuccess = (event) => {
         const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result;
         if (cursor) {
           const storedKey = cursor.value.key as string;
-          if (storedKey === prefixStr || storedKey.startsWith(prefixStr + "\x00")) {
+          if (
+            storedKey === prefixStr ||
+            storedKey.startsWith(`${prefixStr}\x00`)
+          ) {
             const deleteRequest = cursor.delete();
             deletePromises.push(
               new Promise((res, rej) => {
                 deleteRequest.onsuccess = () => res();
                 deleteRequest.onerror = () => rej(deleteRequest.error);
-              })
+              }),
             );
           }
           cursor.continue();
         } else {
-          Promise.all(deletePromises).then(() => resolve()).catch(reject);
+          Promise.all(deletePromises)
+            .then(() => resolve())
+            .catch(reject);
         }
       };
     });

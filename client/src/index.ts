@@ -11,14 +11,14 @@
 export { type AuthResult, authenticate } from "./auth.ts";
 export { RatatoskrClient, type RatatoskrClientOptions } from "./client.ts";
 export { RatatoskrNetworkAdapter } from "./network-adapter.ts";
-export type { ACLEntry, ApiToken, DocumentMetadata, User } from "./types.ts";
+export type {
+  ConnectivityState,
+  DocumentStatusEntry,
+  DocumentSyncStatus,
+  SyncEvent,
+  SyncEventType,
+} from "./offline/index.ts";
 
 // Offline support
 export { IndexedDBStorageAdapter } from "./storage/indexeddb-storage-adapter.ts";
-export {
-  type ConnectivityState,
-  type DocumentSyncStatus,
-  type DocumentStatusEntry,
-  type SyncEvent,
-  type SyncEventType,
-} from "./offline/index.ts";
+export type { ACLEntry, ApiToken, DocumentMetadata, User } from "./types.ts";

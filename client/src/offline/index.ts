@@ -3,29 +3,29 @@
  */
 
 export {
+  type ConnectivityListener,
   ConnectivityManager,
   type ConnectivityState,
-  type ConnectivityListener,
 } from "./connectivity-manager.ts";
 
 export {
-  DocumentStatusTracker,
-  type DocumentSyncStatus,
   type DocumentStatusEntry,
   type DocumentStatusListener,
+  DocumentStatusTracker,
+  type DocumentSyncStatus,
 } from "./document-status-tracker.ts";
 
 export {
-  PendingOperationsQueue,
+  type OperationProcessor,
   type OperationType,
   type PendingOperation,
-  type OperationProcessor,
+  PendingOperationsQueue,
 } from "./pending-operations-queue.ts";
 
 export {
   SyncCoordinator,
   type SyncCoordinatorOptions,
   type SyncEvent,
-  type SyncEventType,
   type SyncEventListener,
+  type SyncEventType,
 } from "./sync-coordinator.ts";

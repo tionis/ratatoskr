@@ -54,7 +54,7 @@ describe("Ephemeral Document Manager", () => {
   test("ephemeral document is deleted after timeout when no peers", async () => {
     const { ephemeralManager } = await import("../src/sync/ephemeral.ts");
 
-    const docId = "eph:timeout-test-" + Date.now();
+    const docId = `eph:timeout-test-${Date.now()}`;
     const peerId = "peer-timeout";
 
     // Add and remove peer
