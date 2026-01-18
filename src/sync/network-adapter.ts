@@ -41,6 +41,7 @@ export class ServerNetworkAdapter extends NetworkAdapter {
     this.peerId = peerId;
     this.peerMetadata = peerMetadata ?? {};
     this.ready = true;
+    // biome-ignore lint/suspicious/noExplicitAny: event type strictness
     this.emit("ready" as any, { network: this });
   }
 
@@ -71,6 +72,7 @@ export class ServerNetworkAdapter extends NetworkAdapter {
   async whenReady(): Promise<void> {
     if (this.ready) return;
     return new Promise((resolve) => {
+      // biome-ignore lint/suspicious/noExplicitAny: event type strictness
       this.once("ready" as any, () => resolve(undefined));
     });
   }

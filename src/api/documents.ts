@@ -215,7 +215,9 @@ export async function documentRoutes(fastify: FastifyInstance): Promise<void> {
         if (format === "json") {
           return {};
         }
-        return reply.header("Content-Type", "application/octet-stream").send(new Uint8Array(0));
+        return reply
+          .header("Content-Type", "application/octet-stream")
+          .send(new Uint8Array(0));
       }
 
       if (format === "json") {
