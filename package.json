@@ -13,13 +13,21 @@
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
     "typecheck": "tsc --noEmit",
-    "db:migrate": "bun run src/storage/migrate.ts"
+    "db:migrate": "bun run src/storage/migrate.ts",
+    "prepare": "husky"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.11",
     "@types/better-sqlite3": "^7.6.13",
     "@types/bun": "latest",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.2.7",
     "typescript": "^5.9.3"
+  },
+  "lint-staged": {
+    "*.{js,ts,json,md}": [
+      "biome check --write --no-errors-on-unmatched"
+    ]
   },
   "dependencies": {
     "@automerge/automerge": "^3.2.2",
