@@ -27,7 +27,7 @@ npm install ratatoskr-client @automerge/automerge-repo
   import { Repo } from 'https://esm.sh/@automerge/automerge-repo';
   
   const client = new RatatoskrClient({
-    serverUrl: 'https://your-ratatoskr-server.com'
+    serverUrl: window.location.origin
   });
   
   // Login via popup
@@ -56,7 +56,7 @@ npm install ratatoskr-client @automerge/automerge-repo
     import { RatatoskrClient } from 'https://esm.sh/ratatoskr-client';
     
     const client = new RatatoskrClient({
-      serverUrl: 'https://your-server.com'
+      serverUrl: window.location.origin
     });
     
     // Login button
@@ -369,7 +369,7 @@ adapter.setToken(newToken);
   <script type="importmap">
     {
       "imports": {
-        "ratatoskr-client": "https://esm.sh/ratatoskr-client",
+        "ratatoskr-client": "https://esm.sh/ratatoskr-client?external=@automerge/automerge-repo",
         "@automerge/automerge-repo": "https://esm.sh/@automerge/automerge-repo"
       }
     }
@@ -378,9 +378,9 @@ adapter.setToken(newToken);
 <body>
   <script type="module">
     import { RatatoskrClient } from 'ratatoskr-client';
-    
+
     const client = new RatatoskrClient({
-      serverUrl: 'https://sync.example.com'
+      serverUrl: window.location.origin
     });
     
     // Check for existing session
@@ -441,7 +441,7 @@ export function useRatatoskr() {
 
 ```typescript
 // Use the token directly with fetch or the network adapter
-const response = await fetch('https://sync.example.com/api/v1/documents', {
+const response = await fetch(`${process.env.RATATOSKR_URL}/api/v1/documents`, {
   headers: {
     'Authorization': `Bearer ${process.env.RATATOSKR_TOKEN}`
   }
