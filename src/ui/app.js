@@ -210,7 +210,8 @@
           ${doc.expiresAt ? `<span>Expires: ${formatDate(doc.expiresAt)}</span>` : ""}
         </div>
         <div class="document-actions">
-          <button class="btn btn-secondary btn-small" onclick="viewDocument('${doc.id}')">Edit</button>
+          <button class="btn btn-secondary btn-small" onclick="viewDocument('${doc.id}')">Content</button>
+          <button class="btn btn-secondary btn-small" onclick="editDocumentType('${doc.id}')">Type</button>
           <button class="btn btn-secondary btn-small" onclick="exportDocument('${doc.id}', 'json')">JSON</button>
           <button class="btn btn-secondary btn-small" onclick="exportDocument('${doc.id}', 'binary')">Bin</button>
           ${
@@ -609,6 +610,42 @@
     });
   };
 
+  // Edit Document Type
+  window.editDocumentType = async (docId) => {
+    currentEditingDocId = docId;
+    document.getElementById("edit-type-doc-id").textContent = docId;
+    
+    // Clear previous value
+    document.getElementById("edit-doc-type").value = "Loading...";
+    openModal("edit-type-modal");
+
+    try {
+      const doc = await api("GET", `/documents/${encodeURIComponent(docId)}`);
+      document.getElementById("edit-doc-type").value = doc.type || "";
+    } catch (err) {
+      document.getElementById("edit-doc-type").value = "";
+      showToast(`Failed to load document: ${err.message}`, "error");
+    }
+  };
+
+  async function saveDocumentType(e) {
+    e.preventDefault();
+    const type = document.getElementById("edit-doc-type").value.trim();
+
+    try {
+      await api(
+        "PUT",
+        `/documents/${encodeURIComponent(currentEditingDocId)}/type`,
+        { type },
+      );
+      closeModal("edit-type-modal");
+      showToast("Document type updated", "success");
+      loadDocuments();
+    } catch (err) {
+      showToast(err.message, "error");
+    }
+  }
+
   // Confirm Dialog
   function showConfirm(title, message, callback) {
     document.getElementById("confirm-title").textContent = title;
@@ -658,6 +695,9 @@
   document
     .getElementById("save-content-btn")
     .addEventListener("click", saveDocumentContent);
+  document
+    .getElementById("edit-type-form")
+    .addEventListener("submit", saveDocumentType);
   document
     .getElementById("copy-token-btn")
     .addEventListener("click", copyToken);

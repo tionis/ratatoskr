@@ -159,6 +159,27 @@
       </div>
     </div>
 
+    <!-- Edit Document Type Modal -->
+    <div id="edit-type-modal" class="modal hidden">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2>Edit Document Type</h2>
+          <button class="modal-close">&times;</button>
+        </div>
+        <div class="edit-doc-info" id="edit-type-doc-id" style="padding: 1rem 1.5rem; font-family: monospace; background: var(--bg-tertiary); margin-bottom: 1rem;"></div>
+        <form id="edit-type-form">
+          <div class="form-group">
+            <label for="edit-doc-type">New Type</label>
+            <input type="text" id="edit-doc-type" placeholder="e.g., notes, project" required>
+          </div>
+          <div class="form-actions">
+            <button type="button" class="btn btn-secondary modal-cancel">Cancel</button>
+            <button type="submit" class="btn btn-primary">Save</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <!-- Edit ACL Modal -->
     <div id="edit-acl-modal" class="modal hidden">
       <div class="modal-content modal-large">
