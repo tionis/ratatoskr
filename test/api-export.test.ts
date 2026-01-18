@@ -1,29 +1,29 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
+import type { FastifyInstance } from "fastify";
+import { createSessionToken } from "../src/auth/tokens.ts";
 import { config } from "../src/config.ts";
 import { createServer } from "../src/server.ts";
-import { initDatabase, createUser } from "../src/storage/database.ts";
-import { createSessionToken } from "../src/auth/tokens.ts";
+import { createUser, initDatabase } from "../src/storage/database.ts";
 
-const TEST_DIR = join(process.cwd(), ".test-api-export-" + Date.now());
+const TEST_DIR = join(process.cwd(), `.test-api-export-${Date.now()}`);
 
 // Mock config
 config.dataDir = TEST_DIR;
-// Ensure other config values are present to avoid validation errors if createServer uses them
-// (Though createServer mostly uses config for middleware setup, checking defaults is good)
+// Ensure other config values are present to avoid validation errors if createServer mostly uses config for middleware setup, checking defaults is good
 
-let server: any;
+let server: FastifyInstance;
 let authToken: string;
 const userId = "test-user-export";
 
 beforeAll(async () => {
   // Initialize DB
   await initDatabase(TEST_DIR);
-  
+
   // Create user
   createUser({ id: userId, name: "Export User", email: "export@example.com" });
-  
+
   // Generate token
   authToken = createSessionToken(userId);
 
@@ -44,7 +44,7 @@ test("API Export/Import > should create, update content, and export document", a
     method: "POST",
     url: "/api/v1/documents",
     headers: { Authorization: `Bearer ${authToken}` },
-    payload: { id: docId, type: "notes" }
+    payload: { id: docId, type: "notes" },
   });
   expect(createRes.statusCode).toBe(200);
 
@@ -54,7 +54,7 @@ test("API Export/Import > should create, update content, and export document", a
     method: "PUT",
     url: `/api/v1/documents/${docId}/content`,
     headers: { Authorization: `Bearer ${authToken}` },
-    payload: newContent
+    payload: newContent,
   });
   expect(updateRes.statusCode).toBe(200);
   expect(updateRes.json().success).toBe(true);
@@ -63,7 +63,7 @@ test("API Export/Import > should create, update content, and export document", a
   const exportJsonRes = await server.inject({
     method: "GET",
     url: `/api/v1/documents/${docId}/export?format=json`,
-    headers: { Authorization: `Bearer ${authToken}` }
+    headers: { Authorization: `Bearer ${authToken}` },
   });
   expect(exportJsonRes.statusCode).toBe(200);
   const jsonContent = exportJsonRes.json();
@@ -74,9 +74,9 @@ test("API Export/Import > should create, update content, and export document", a
   const exportBinRes = await server.inject({
     method: "GET",
     url: `/api/v1/documents/${docId}/export?format=binary`,
-    headers: { Authorization: `Bearer ${authToken}` }
+    headers: { Authorization: `Bearer ${authToken}` },
   });
   expect(exportBinRes.statusCode).toBe(200);
-  expect(exportBinRes.headers['content-type']).toBe('application/octet-stream');
+  expect(exportBinRes.headers["content-type"]).toBe("application/octet-stream");
   expect(exportBinRes.rawPayload.length).toBeGreaterThan(0);
 });

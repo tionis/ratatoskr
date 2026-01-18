@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
-import { readFileSync } from "fs";
-import { join } from "path";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 test("src/ui/docs.html should include prism scripts in correct order", () => {
   const docsPath = join(process.cwd(), "src/ui/docs.html");

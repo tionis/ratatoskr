@@ -208,7 +208,9 @@ export async function documentRoutes(fastify: FastifyInstance): Promise<void> {
         if (format === "json") {
           return {};
         }
-        return reply.header("Content-Type", "application/octet-stream").send(new Uint8Array(0));
+        return reply
+          .header("Content-Type", "application/octet-stream")
+          .send(new Uint8Array(0));
       }
 
       if (format === "json") {
@@ -218,7 +220,7 @@ export async function documentRoutes(fastify: FastifyInstance): Promise<void> {
         } catch (err) {
           reply.code(500).send({
             error: "internal_error",
-            message: "Failed to parse document: " + (err as Error).message,
+            message: `Failed to parse document: ${(err as Error).message}`,
           });
           return;
         }
@@ -269,7 +271,7 @@ export async function documentRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       // Load existing or create new
-      let data = await readDocument(id);
+      const data = await readDocument(id);
       let automergeDoc: Automerge.Doc<unknown>;
 
       try {
@@ -280,6 +282,7 @@ export async function documentRoutes(fastify: FastifyInstance): Promise<void> {
         }
 
         // Apply changes
+        // biome-ignore lint/suspicious/noExplicitAny: Automerge document root is dynamic
         automergeDoc = Automerge.change(automergeDoc, (d: any) => {
           // Clear existing keys
           for (const key of Object.keys(d)) {
@@ -297,7 +300,7 @@ export async function documentRoutes(fastify: FastifyInstance): Promise<void> {
       } catch (err) {
         reply.code(500).send({
           error: "internal_error",
-          message: "Failed to update document: " + (err as Error).message,
+          message: `Failed to update document: ${(err as Error).message}`,
         });
         return;
       }

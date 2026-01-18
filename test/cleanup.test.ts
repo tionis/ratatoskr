@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { cleanupExpiredItems } from "../src/lib/cleanup.ts";
 import { config } from "../src/config.ts";
+import { cleanupExpiredItems } from "../src/lib/cleanup.ts";
 import {
   createDocument,
   createUser,
@@ -13,13 +13,13 @@ import {
 } from "../src/storage/database.ts";
 import { getDocumentPath } from "../src/storage/documents.ts";
 
-const TEST_DIR = join(process.cwd(), ".test-cleanup-" + Date.now());
+const TEST_DIR = join(process.cwd(), `.test-cleanup-${Date.now()}`);
 
 beforeAll(async () => {
   // Setup temp environment
   config.dataDir = TEST_DIR;
   await initDatabase(TEST_DIR);
-  
+
   // Create a user for testing
   createUser({ id: "test-user", name: "Test User" });
 });
@@ -47,9 +47,12 @@ test("Cleanup Job > should remove expired tokens and documents", () => {
 
   // 2. Setup Documents
   // Create expired document
-  const expiredDoc = createDocument({ id: "doc:expired", ownerId: "test-user" });
+  const expiredDoc = createDocument({
+    id: "doc:expired",
+    ownerId: "test-user",
+  });
   updateDocumentExpiration(expiredDoc.id, new Date(Date.now() - 3600000)); // 1 hour ago
-  
+
   // Create file for expired document
   const expiredPath = getDocumentPath(expiredDoc.id);
   // Ensure dir exists
@@ -59,18 +62,20 @@ test("Cleanup Job > should remove expired tokens and documents", () => {
   // Create valid document
   const validDoc = createDocument({ id: "doc:valid", ownerId: "test-user" });
   updateDocumentExpiration(validDoc.id, new Date(Date.now() + 3600000)); // 1 hour future
-  
+
   // Create file for valid document
   const validPath = getDocumentPath(validDoc.id);
   mkdirSync(join(validPath, ".."), { recursive: true });
   writeFileSync(validPath, "valid content");
 
   // Create valid document with no expiration
-  const permanentDoc = createDocument({ id: "doc:permanent", ownerId: "test-user" });
+  const permanentDoc = createDocument({
+    id: "doc:permanent",
+    ownerId: "test-user",
+  });
   const permanentPath = getDocumentPath(permanentDoc.id);
   mkdirSync(join(permanentPath, ".."), { recursive: true });
   writeFileSync(permanentPath, "permanent content");
-
 
   // 3. Run Cleanup
   const result = cleanupExpiredItems();
@@ -80,8 +85,10 @@ test("Cleanup Job > should remove expired tokens and documents", () => {
   expect(result.documentsDeleted).toBe(1);
 
   // Check Tokens
-  const tokens = db.prepare("SELECT id FROM api_tokens").all() as { id: string }[];
-  const tokenIds = tokens.map(t => t.id);
+  const tokens = db.prepare("SELECT id FROM api_tokens").all() as {
+    id: string;
+  }[];
+  const tokenIds = tokens.map((t) => t.id);
   expect(tokenIds).toContain("token-valid");
   expect(tokenIds).not.toContain("token-expired");
 

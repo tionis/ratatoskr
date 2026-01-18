@@ -41,6 +41,7 @@ body {
 
 /* Utilities */
 .hidden {
+  /* biome-ignore lint/complexity/noImportantStyles: strictly required to override specificity */
   display: none !important;
 }
 

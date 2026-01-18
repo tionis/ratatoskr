@@ -13,7 +13,7 @@ Guidelines for LLM agents working on this repository.
 - **Update `STATE.md`** when you complete features or discover issues
 - **Update documentation** in `docs/` and `README.md` when changing behavior
 - **Run tests** with `bun test` before committing
-- **Run linting** with `bun run lint:fix` before committing
+- **Run linting** with `bun run lint` or `bun run lint:fix` before committing. Ensure all checks pass.
 
 ## After Work
 
