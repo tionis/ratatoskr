@@ -7,6 +7,7 @@
   let currentAclDocId = null;
   let currentAclEntries = [];
   let pendingConfirmCallback = null;
+  let currentEditingDocId = null;
 
   // DOM Elements
   const loginScreen = document.getElementById("login-screen");
@@ -209,6 +210,9 @@
           ${doc.expiresAt ? `<span>Expires: ${formatDate(doc.expiresAt)}</span>` : ""}
         </div>
         <div class="document-actions">
+          <button class="btn btn-secondary btn-small" onclick="viewDocument('${doc.id}')">Edit</button>
+          <button class="btn btn-secondary btn-small" onclick="exportDocument('${doc.id}', 'json')">JSON</button>
+          <button class="btn btn-secondary btn-small" onclick="exportDocument('${doc.id}', 'binary')">Bin</button>
           ${
             isOwner
               ? `
@@ -521,6 +525,90 @@
     }
   }
 
+  // Document Content & Export
+  window.viewDocument = async (docId) => {
+    currentEditingDocId = docId;
+    document.getElementById("edit-doc-id").textContent = docId;
+    const textArea = document.getElementById("doc-content-json");
+    textArea.value = "Loading...";
+    openModal("edit-doc-modal");
+
+    try {
+      const content = await api(
+        "GET",
+        `/documents/${encodeURIComponent(docId)}/export?format=json`,
+      );
+      textArea.value = JSON.stringify(content, null, 2);
+    } catch (err) {
+      textArea.value = `Error loading content: ${err.message}`;
+    }
+  };
+
+  async function saveDocumentContent() {
+    const textArea = document.getElementById("doc-content-json");
+    let content;
+
+    try {
+      content = JSON.parse(textArea.value);
+    } catch (err) {
+      showToast(`Invalid JSON: ${err.message}`, "error");
+      return;
+    }
+
+    try {
+      await api(
+        "PUT",
+        `/documents/${encodeURIComponent(currentEditingDocId)}/content`,
+        content,
+      );
+      closeModal("edit-doc-modal");
+      showToast("Document updated", "success");
+      loadDocuments();
+    } catch (err) {
+      showToast(err.message, "error");
+    }
+  }
+
+  window.exportDocument = (docId, format) => {
+    if (!authToken) {
+      showToast("Not authenticated", "error");
+      return;
+    }
+
+    // Direct window.open doesn't allow setting headers easily for Bearer token.
+    // However, if we use a cookie-based auth or query param token, it works.
+    // Since this is a simple UI, we'll try to use the fetch to get a blob and download it.
+    
+    // For simplicity in this demo, we can just use the API if it supports cookie auth or similar.
+    // The server has cookie support (@fastify/cookie registered), but we use Bearer in `api()` helper.
+    // To support download with Bearer token, we need to fetch -> blob -> objectURL -> click.
+
+    const url = `/api/v1/documents/${encodeURIComponent(docId)}/export?format=${format}`;
+    
+    fetch(url, {
+      headers: {
+        Authorization: `Bearer ${authToken}`
+      }
+    })
+    .then(response => {
+      if (!response.ok) throw new Error("Download failed");
+      return response.blob();
+    })
+    .then(blob => {
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = downloadUrl;
+      a.download = `${docId.split(':').pop()}.${format === 'json' ? 'json' : 'amrg'}`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(downloadUrl);
+      a.remove();
+    })
+    .catch(err => {
+      showToast(err.message, "error");
+    });
+  };
+
   // Confirm Dialog
   function showConfirm(title, message, callback) {
     document.getElementById("confirm-title").textContent = title;
@@ -567,6 +655,9 @@
     .addEventListener("submit", createToken);
   document.getElementById("acl-add-btn").addEventListener("click", addAclEntry);
   document.getElementById("acl-save-btn").addEventListener("click", saveAcl);
+  document
+    .getElementById("save-content-btn")
+    .addEventListener("click", saveDocumentContent);
   document
     .getElementById("copy-token-btn")
     .addEventListener("click", copyToken);

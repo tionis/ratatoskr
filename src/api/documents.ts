@@ -1,3 +1,4 @@
+import * as Automerge from "@automerge/automerge";
 import type { FastifyInstance } from "fastify";
 import { requireAuth } from "../auth/middleware.ts";
 import { checkDocumentCreationQuota } from "../lib/quotas.ts";
@@ -14,9 +15,14 @@ import {
   getUserTotalStorage,
   setDocumentACL,
   updateDocumentExpiration,
+  updateDocumentSize,
   updateDocumentType,
 } from "../storage/database.ts";
-import { deleteDocumentFile } from "../storage/documents.ts";
+import {
+  deleteDocumentFile,
+  readDocument,
+  writeDocument,
+} from "../storage/documents.ts";
 import {
   createDocumentSchema,
   updateDocumentAclSchema,
@@ -124,7 +130,7 @@ export async function documentRoutes(fastify: FastifyInstance): Promise<void> {
     };
   });
 
-  // Get document
+  // Get document metadata
   fastify.get("/:id", { preHandler: requireAuth }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const userId = request.auth!.userId;
@@ -138,8 +144,7 @@ export async function documentRoutes(fastify: FastifyInstance): Promise<void> {
       return;
     }
 
-    // Check access (basic check - owner or in ACL)
-    // TODO: Use full ACL resolution
+    // Check access
     if (doc.ownerId !== userId) {
       const acl = getDocumentACL(id);
       const hasAccess = acl.some(
@@ -160,6 +165,144 @@ export async function documentRoutes(fastify: FastifyInstance): Promise<void> {
       acl: getDocumentACL(id),
     };
   });
+
+  // Export document content
+  fastify.get(
+    "/:id/export",
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const { format } = request.query as { format?: string };
+      const userId = request.auth!.userId;
+
+      const doc = getDocument(id);
+      if (!doc) {
+        reply.code(404).send({
+          error: "not_found",
+          message: "Document not found",
+        });
+        return;
+      }
+
+      // Check read access
+      if (doc.ownerId !== userId) {
+        const acl = getDocumentACL(id);
+        const hasAccess = acl.some(
+          (e) =>
+            (e.principal === userId || e.principal === "public") &&
+            (e.permission === "read" || e.permission === "write"),
+        );
+
+        if (!hasAccess) {
+          reply.code(403).send({
+            error: "forbidden",
+            message: "Access denied",
+          });
+          return;
+        }
+      }
+
+      const data = await readDocument(id);
+      if (!data) {
+        // Empty document or file missing
+        if (format === "json") {
+          return {};
+        }
+        return reply.header("Content-Type", "application/octet-stream").send(new Uint8Array(0));
+      }
+
+      if (format === "json") {
+        try {
+          const automergeDoc = Automerge.load(data);
+          return Automerge.view(automergeDoc);
+        } catch (err) {
+          reply.code(500).send({
+            error: "internal_error",
+            message: "Failed to parse document: " + (err as Error).message,
+          });
+          return;
+        }
+      } else {
+        // Binary
+        reply
+          .header("Content-Type", "application/octet-stream")
+          .header("Content-Disposition", `attachment; filename="${id}.amrg"`);
+        return reply.send(data);
+      }
+    },
+  );
+
+  // Update document content (from JSON)
+  fastify.put(
+    "/:id/content",
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const userId = request.auth!.userId;
+      const newContent = request.body as Record<string, unknown>;
+
+      const doc = getDocument(id);
+      if (!doc) {
+        reply.code(404).send({
+          error: "not_found",
+          message: "Document not found",
+        });
+        return;
+      }
+
+      // Check write access
+      if (doc.ownerId !== userId) {
+        const acl = getDocumentACL(id);
+        const hasAccess = acl.some(
+          (e) =>
+            (e.principal === userId || e.principal === "public") &&
+            e.permission === "write",
+        );
+
+        if (!hasAccess) {
+          reply.code(403).send({
+            error: "forbidden",
+            message: "Access denied",
+          });
+          return;
+        }
+      }
+
+      // Load existing or create new
+      let data = await readDocument(id);
+      let automergeDoc: Automerge.Doc<unknown>;
+
+      try {
+        if (data && data.length > 0) {
+          automergeDoc = Automerge.load(data);
+        } else {
+          automergeDoc = Automerge.init();
+        }
+
+        // Apply changes
+        automergeDoc = Automerge.change(automergeDoc, (d: any) => {
+          // Clear existing keys
+          for (const key of Object.keys(d)) {
+            delete d[key];
+          }
+          // Set new keys
+          Object.assign(d, newContent);
+        });
+
+        const newData = Automerge.save(automergeDoc);
+        await writeDocument(id, newData);
+        updateDocumentSize(id, newData.length);
+
+        return { success: true, size: newData.length };
+      } catch (err) {
+        reply.code(500).send({
+          error: "internal_error",
+          message: "Failed to update document: " + (err as Error).message,
+        });
+        return;
+      }
+    },
+  );
 
   // Delete document
   fastify.delete(
