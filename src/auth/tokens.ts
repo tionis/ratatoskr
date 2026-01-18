@@ -117,7 +117,7 @@ export function verifyApiToken(token: string): string | null {
   const stmt = getDb().prepare(`
     SELECT * FROM api_tokens
     WHERE token_hash = ?
-    AND (expires_at IS NULL OR expires_at > datetime('now'))
+    AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))
   `);
 
   const row = stmt.get(tokenHash) as Record<string, unknown> | undefined;

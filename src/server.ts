@@ -7,6 +7,7 @@ import Fastify from "fastify";
 import { authRoutes } from "./api/auth.ts";
 import { documentRoutes } from "./api/documents.ts";
 import type { Config } from "./config.ts";
+import { startCleanupJob } from "./lib/cleanup.ts";
 import { syncHandler } from "./sync/handler.ts";
 
 export async function createServer(_config: Config) {
@@ -53,6 +54,9 @@ export async function createServer(_config: Config) {
   server.register(async (fastify) => {
     fastify.get("/sync", { websocket: true }, syncHandler);
   });
+
+  // Start background tasks
+  startCleanupJob();
 
   return server;
 }

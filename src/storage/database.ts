@@ -252,3 +252,19 @@ export function getAccessibleDocuments(userId: string): DocumentMetadata[] {
   const rows = stmt.all(userId) as Record<string, unknown>[];
   return rows.map(rowToDocument);
 }
+
+export function getExpiredDocuments(): string[] {
+  const stmt = getDb().prepare(
+    "SELECT id FROM documents WHERE datetime(expires_at) < datetime('now')",
+  );
+  const rows = stmt.all() as { id: string }[];
+  return rows.map((r) => r.id);
+}
+
+export function deleteExpiredTokens(): number {
+  const stmt = getDb().prepare(
+    "DELETE FROM api_tokens WHERE datetime(expires_at) < datetime('now')",
+  );
+  const result = stmt.run();
+  return result.changes;
+}
