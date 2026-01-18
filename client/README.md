@@ -10,6 +10,8 @@ Browser client library for [Ratatoskr](https://github.com/tionis/ratatoskr) - an
 - 🔑 **Access control** - Manage document ACLs and permissions
 - 🎫 **API tokens** - Generate tokens for CLI/programmatic access
 - 🌐 **Works everywhere** - Browser, bundlers, or direct ESM import
+- 📴 **Offline-first** - Create and edit documents offline, sync when back online
+- 💾 **Persistent storage** - Documents saved to IndexedDB survive browser sessions
 
 ## Quick Start
 
@@ -98,12 +100,13 @@ new RatatoskrClient(options: RatatoskrClientOptions)
 |--------|------|----------|---------|-------------|
 | `serverUrl` | `string` | ✅ | - | Base URL of the Ratatoskr server |
 | `tokenStorageKey` | `string` | ❌ | `"ratatoskr:token"` | localStorage key for token persistence |
+| `enableOfflineSupport` | `boolean` | ❌ | `true` | Enable offline-first document creation with IndexedDB storage |
 
 #### Authentication Methods
 
 ##### `login(): Promise<User>`
 
-Opens a popup for OIDC authentication. Returns user info on success.
+Opens a popup for OIDC authentication. Returns user info on success. Requires network connectivity.
 
 ```typescript
 const user = await client.login();
@@ -120,7 +123,7 @@ client.logout();
 
 ##### `isAuthenticated(): boolean`
 
-Check if user has a stored token.
+Check if user has a stored token (doesn't validate the token).
 
 ```typescript
 if (client.isAuthenticated()) {
@@ -128,13 +131,23 @@ if (client.isAuthenticated()) {
 }
 ```
 
+##### `hasStoredCredentials(): boolean`
+
+Check if both token and user info are cached. Useful for showing "Welcome back" UI even when offline.
+
+```typescript
+if (client.hasStoredCredentials()) {
+  console.log(`Welcome back, ${client.getUser()?.name}!`);
+}
+```
+
 ##### `getUser(): User | null`
 
-Get the current user object (available after `login()` or `fetchUserInfo()`).
+Get the current user object. When offline with stored credentials, returns the cached user.
 
 ##### `fetchUserInfo(): Promise<User>`
 
-Fetch current user info from the server. Useful to validate stored tokens.
+Fetch current user info from the server. Updates the cached user info. Useful to validate stored tokens.
 
 ```typescript
 try {
@@ -142,7 +155,19 @@ try {
   console.log('Token valid for:', user.name);
 } catch {
   console.log('Token expired, need to login again');
-  client.logout();
+}
+```
+
+##### `validateToken(): Promise<boolean>`
+
+Validate the stored token by fetching user info. Returns `true` if valid, `false` if expired/invalid.
+
+```typescript
+if (client.isAuthenticated()) {
+  const isValid = await client.validateToken();
+  if (!isValid) {
+    // Token expired, prompt re-login
+  }
 }
 ```
 
@@ -301,6 +326,118 @@ Revoke an API token.
 await client.deleteApiToken('token-id-here');
 ```
 
+#### Offline-First Document Creation
+
+Documents can be created and edited offline. They'll be registered on the server when connectivity and authentication are restored.
+
+##### `createDocumentOffline<T>(initialValue, options?): Promise<string>`
+
+Create a document that works offline. Returns the document ID immediately.
+
+```typescript
+// Create document offline - works even without network
+const docId = await client.createDocumentOffline(
+  { title: 'My Notes', items: [] },
+  { type: 'notes' }
+);
+
+// Document is usable immediately via automerge
+const handle = client.getRepo().find(docId);
+handle.change(doc => {
+  doc.items.push('First item');
+});
+
+// When online + authenticated, document auto-registers on server
+```
+
+**Note:** Documents created offline are **private** (no ACLs) until you're online. You can set ACLs after the document syncs using `setDocumentACL()`.
+
+##### `getDocumentSyncStatus(documentId): Promise<DocumentStatusEntry | undefined>`
+
+Get the sync status of a document.
+
+```typescript
+const status = await client.getDocumentSyncStatus(docId);
+if (status) {
+  console.log('Status:', status.status); // 'local' | 'syncing' | 'synced'
+  console.log('Registered on server:', status.serverRegistered);
+}
+```
+
+##### `getConnectivityState(): ConnectivityState`
+
+Get the current connectivity state.
+
+```typescript
+const state = client.getConnectivityState();
+// 'online' | 'offline' | 'connecting'
+```
+
+##### `processPendingOperations(): Promise<{processed, failed}>`
+
+Force processing of pending sync operations. Useful after login.
+
+```typescript
+await client.login();
+const result = await client.processPendingOperations();
+console.log(`Synced ${result.processed} documents`);
+```
+
+##### `getPendingOperationsCount(): Promise<number>`
+
+Get the number of pending sync operations.
+
+##### `getUnsyncedDocuments(): Promise<DocumentStatusEntry[]>`
+
+Get all documents that haven't been synced to the server yet.
+
+##### `onSyncEvent(listener): () => void`
+
+Subscribe to sync events. Returns an unsubscribe function.
+
+```typescript
+const unsubscribe = client.onSyncEvent((event) => {
+  switch (event.type) {
+    case 'connectivity:changed':
+      console.log('Connectivity:', event.connectivity);
+      break;
+    case 'document:status-changed':
+      console.log(`Document ${event.documentId}: ${event.status}`);
+      break;
+    case 'sync:completed':
+      console.log(`Synced ${event.processed} documents`);
+      break;
+    case 'auth:required':
+      console.log('Please log in to sync');
+      break;
+    case 'auth:token-expired':
+      console.log('Token expired, please log in again');
+      break;
+  }
+});
+
+// Later: unsubscribe()
+```
+
+**Event Types:**
+| Event | Description |
+|-------|-------------|
+| `connectivity:changed` | Network/server connection state changed |
+| `document:status-changed` | A document's sync status changed |
+| `sync:started` | Sync processing started |
+| `sync:completed` | Sync processing completed |
+| `sync:error` | Sync error occurred |
+| `auth:required` | Authentication needed to continue syncing |
+| `auth:token-expired` | Token is invalid/expired |
+
+##### `isOfflineEnabled(): boolean`
+
+Check if offline support is enabled.
+
+##### `destroy(): void`
+
+Cleanup all resources including IndexedDB connections.
+
 ### Types
 
 ```typescript
@@ -332,6 +469,39 @@ interface ApiToken {
   lastUsedAt: string | null;
   expiresAt: string | null;
   createdAt: string;
+}
+
+// Offline support types
+type ConnectivityState = 'online' | 'offline' | 'connecting';
+
+type DocumentSyncStatus = 'local' | 'syncing' | 'synced';
+
+interface DocumentStatusEntry {
+  documentId: string;
+  status: DocumentSyncStatus;
+  serverRegistered: boolean;
+  createdAt: string;
+  lastSyncAttempt?: string;
+  error?: string;
+}
+
+type SyncEventType =
+  | 'sync:started'
+  | 'sync:completed'
+  | 'sync:error'
+  | 'document:status-changed'
+  | 'connectivity:changed'
+  | 'auth:required'
+  | 'auth:token-expired';
+
+interface SyncEvent {
+  type: SyncEventType;
+  documentId?: string;
+  status?: DocumentSyncStatus;
+  connectivity?: ConnectivityState;
+  error?: string;
+  processed?: number;
+  failed?: number;
 }
 ```
 

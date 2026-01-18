@@ -115,3 +115,30 @@ export function getStoredToken(key: string): string | null {
 export function clearStoredToken(key: string): void {
   localStorage.removeItem(key);
 }
+
+/**
+ * Store user info in localStorage.
+ */
+export function storeUser(key: string, user: User): void {
+  localStorage.setItem(key, JSON.stringify(user));
+}
+
+/**
+ * Retrieve user info from localStorage.
+ */
+export function getStoredUser(key: string): User | null {
+  const stored = localStorage.getItem(key);
+  if (!stored) return null;
+  try {
+    return JSON.parse(stored) as User;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Remove user info from localStorage.
+ */
+export function clearStoredUser(key: string): void {
+  localStorage.removeItem(key);
+}

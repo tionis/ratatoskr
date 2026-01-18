@@ -5,9 +5,20 @@
  * - Popup-based authentication
  * - WebSocket connection to Ratatoskr server
  * - Integration with automerge-repo
+ * - Offline-first document creation and sync
  */
 
 export { type AuthResult, authenticate } from "./auth.ts";
 export { RatatoskrClient, type RatatoskrClientOptions } from "./client.ts";
 export { RatatoskrNetworkAdapter } from "./network-adapter.ts";
 export type { ACLEntry, ApiToken, DocumentMetadata, User } from "./types.ts";
+
+// Offline support
+export { IndexedDBStorageAdapter } from "./storage/indexeddb-storage-adapter.ts";
+export {
+  type ConnectivityState,
+  type DocumentSyncStatus,
+  type DocumentStatusEntry,
+  type SyncEvent,
+  type SyncEventType,
+} from "./offline/index.ts";

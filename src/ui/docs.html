@@ -226,6 +226,10 @@
       </ul>
     </nav>
 
+    <div class="note success" style="margin-bottom: 2rem;">
+      <strong>Offline-First:</strong> This library supports offline document creation. Documents are stored in IndexedDB and sync automatically when connectivity is restored.
+    </div>
+
     <section id="quickstart">
       <h2>Quick Start</h2>
 
@@ -305,12 +309,19 @@ console.log('My documents:', owned);
           <td><code>"ratatoskr:token"</code></td>
           <td>localStorage key for token persistence</td>
         </tr>
+        <tr>
+          <td><code>enableOfflineSupport</code></td>
+          <td><code>boolean</code></td>
+          <td><span class="badge badge-optional">Optional</span></td>
+          <td><code>true</code></td>
+          <td>Enable offline-first document creation with IndexedDB storage</td>
+        </tr>
       </table>
 
       <h3>Authentication Methods</h3>
 
       <h4><code>login(): Promise&lt;User&gt;</code></h4>
-      <p>Opens a popup for OIDC authentication. Returns user info on success.</p>
+      <p>Opens a popup for OIDC authentication. Returns user info on success. Requires network connectivity.</p>
       <pre><code class="language-javascript">const user = await client.login();
 // { id: "alice", name: "Alice Smith", email: "alice@example.com" }</code></pre>
 
@@ -319,22 +330,36 @@ console.log('My documents:', owned);
       <pre><code class="language-javascript">client.logout();</code></pre>
 
       <h4><code>isAuthenticated(): boolean</code></h4>
-      <p>Check if user has a stored token (may still be expired).</p>
+      <p>Check if user has a stored token (doesn't validate the token).</p>
       <pre><code class="language-javascript">if (client.isAuthenticated()) {
-  // Token exists
+  // Token exists (may still be expired)
+}</code></pre>
+
+      <h4><code>hasStoredCredentials(): boolean</code></h4>
+      <p>Check if both token and user info are cached. Useful for "Welcome back" UI even when offline.</p>
+      <pre><code class="language-javascript">if (client.hasStoredCredentials()) {
+  console.log(`Welcome back, ${client.getUser()?.name}!`);
 }</code></pre>
 
       <h4><code>getUser(): User | null</code></h4>
-      <p>Get the current user object (available after login or fetchUserInfo).</p>
+      <p>Get the current user object. When offline with stored credentials, returns the cached user.</p>
 
       <h4><code>fetchUserInfo(): Promise&lt;User&gt;</code></h4>
-      <p>Fetch/validate current user info from the server.</p>
+      <p>Fetch/validate current user info from the server. Updates the cached user info.</p>
       <pre><code class="language-javascript">try {
   const user = await client.fetchUserInfo();
   console.log('Token valid for:', user.name);
 } catch {
   console.log('Token expired');
-  client.logout();
+}</code></pre>
+
+      <h4><code>validateToken(): Promise&lt;boolean&gt;</code></h4>
+      <p>Validate the stored token by fetching user info. Returns true if valid, false if expired/invalid.</p>
+      <pre><code class="language-javascript">if (client.isAuthenticated()) {
+  const isValid = await client.validateToken();
+  if (!isValid) {
+    // Token expired, prompt re-login
+  }
 }</code></pre>
 
       <h3>Automerge Integration</h3>
@@ -446,6 +471,78 @@ for (const t of tokens) {
       <h4><code>deleteApiToken(id): Promise&lt;void&gt;</code></h4>
       <p>Revoke an API token.</p>
       <pre><code class="language-javascript">await client.deleteApiToken('token-id-here');</code></pre>
+
+      <h3>Offline-First Document Creation</h3>
+      <p>Documents can be created and edited offline. They'll be registered on the server when connectivity and authentication are restored.</p>
+
+      <h4><code>createDocumentOffline&lt;T&gt;(initialValue, options?): Promise&lt;string&gt;</code></h4>
+      <p>Create a document that works offline. Returns the document ID immediately.</p>
+      <pre><code class="language-javascript">// Create document offline - works even without network
+const docId = await client.createDocumentOffline(
+  { title: 'My Notes', items: [] },
+  { type: 'notes' }
+);
+
+// Document is usable immediately via automerge
+const handle = client.getRepo().find(docId);
+handle.change(doc =&gt; {
+  doc.items.push('First item');
+});
+
+// When online + authenticated, document auto-registers on server</code></pre>
+      <div class="note">
+        <strong>Note:</strong> Documents created offline are <strong>private</strong> (no ACLs) until you're online. You can set ACLs after the document syncs using <code>setDocumentACL()</code>.
+      </div>
+
+      <h4><code>getDocumentSyncStatus(documentId): Promise&lt;DocumentStatusEntry | undefined&gt;</code></h4>
+      <p>Get the sync status of a document.</p>
+      <pre><code class="language-javascript">const status = await client.getDocumentSyncStatus(docId);
+if (status) {
+  console.log('Status:', status.status); // 'local' | 'syncing' | 'synced'
+  console.log('Registered on server:', status.serverRegistered);
+}</code></pre>
+
+      <h4><code>getConnectivityState(): ConnectivityState</code></h4>
+      <p>Get the current connectivity state: <code>'online'</code>, <code>'offline'</code>, or <code>'connecting'</code>.</p>
+
+      <h4><code>processPendingOperations(): Promise&lt;{processed, failed}&gt;</code></h4>
+      <p>Force processing of pending sync operations. Useful after login.</p>
+      <pre><code class="language-javascript">await client.login();
+const result = await client.processPendingOperations();
+console.log(`Synced ${result.processed} documents`);</code></pre>
+
+      <h4><code>onSyncEvent(listener): () =&gt; void</code></h4>
+      <p>Subscribe to sync events. Returns an unsubscribe function.</p>
+      <pre><code class="language-javascript">const unsubscribe = client.onSyncEvent((event) =&gt; {
+  switch (event.type) {
+    case 'connectivity:changed':
+      console.log('Connectivity:', event.connectivity);
+      break;
+    case 'document:status-changed':
+      console.log(`Document ${event.documentId}: ${event.status}`);
+      break;
+    case 'sync:completed':
+      console.log(`Synced ${event.processed} documents`);
+      break;
+    case 'auth:token-expired':
+      console.log('Token expired, please log in again');
+      break;
+  }
+});</code></pre>
+
+      <p><strong>Event Types:</strong></p>
+      <table>
+        <tr><th>Event</th><th>Description</th></tr>
+        <tr><td><code>connectivity:changed</code></td><td>Network/server connection state changed</td></tr>
+        <tr><td><code>document:status-changed</code></td><td>A document's sync status changed</td></tr>
+        <tr><td><code>sync:started</code></td><td>Sync processing started</td></tr>
+        <tr><td><code>sync:completed</code></td><td>Sync processing completed</td></tr>
+        <tr><td><code>auth:required</code></td><td>Authentication needed to continue syncing</td></tr>
+        <tr><td><code>auth:token-expired</code></td><td>Token is invalid/expired</td></tr>
+      </table>
+
+      <h4><code>destroy(): void</code></h4>
+      <p>Cleanup all resources including IndexedDB connections.</p>
     </section>
 
     <section id="types">
@@ -491,6 +588,39 @@ interface ApiToken {
   lastUsedAt: string | null;
   expiresAt: string | null;
   createdAt: string;
+}
+
+// Offline support types
+type ConnectivityState = 'online' | 'offline' | 'connecting';
+
+type DocumentSyncStatus = 'local' | 'syncing' | 'synced';
+
+interface DocumentStatusEntry {
+  documentId: string;
+  status: DocumentSyncStatus;
+  serverRegistered: boolean;
+  createdAt: string;
+  lastSyncAttempt?: string;
+  error?: string;
+}
+
+type SyncEventType =
+  | 'sync:started'
+  | 'sync:completed'
+  | 'sync:error'
+  | 'document:status-changed'
+  | 'connectivity:changed'
+  | 'auth:required'
+  | 'auth:token-expired';
+
+interface SyncEvent {
+  type: SyncEventType;
+  documentId?: string;
+  status?: DocumentSyncStatus;
+  connectivity?: ConnectivityState;
+  error?: string;
+  processed?: number;
+  failed?: number;
 }</code></pre>
     </section>
 

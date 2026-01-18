@@ -8,6 +8,7 @@ Ratatoskr is an automerge-repo sync server with authentication and per-document 
 - **OIDC authentication**: Integrates with any OIDC provider (e.g., Authentik)
 - **Web UI**: Built-in dashboard for managing documents, ACLs, and API tokens
 - **Per-document permissions**: Flexible ACL system with owner-based access control
+- **Offline-first client**: Create and edit documents offline, auto-sync when back online
 - **Multiple document types**:
   - `doc:` - Regular documents with full ACL support
   - `app:` - Per-user-per-app private documents

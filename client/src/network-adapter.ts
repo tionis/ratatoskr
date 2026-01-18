@@ -16,6 +16,10 @@ import {
 export interface RatatoskrNetworkAdapterOptions {
   serverUrl: string;
   token?: string;
+  onConnecting?: () => void;
+  onConnected?: () => void;
+  onDisconnected?: () => void;
+  onAuthError?: (message: string) => void;
 }
 
 export class RatatoskrNetworkAdapter extends NetworkAdapter {
@@ -27,11 +31,19 @@ export class RatatoskrNetworkAdapter extends NetworkAdapter {
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
   private reconnectDelay = 1000;
+  private onConnecting?: () => void;
+  private onConnected?: () => void;
+  private onDisconnected?: () => void;
+  private onAuthError?: (message: string) => void;
 
   constructor(options: RatatoskrNetworkAdapterOptions) {
     super();
     this.serverUrl = options.serverUrl;
     this.token = options.token ?? "";
+    this.onConnecting = options.onConnecting;
+    this.onConnected = options.onConnected;
+    this.onDisconnected = options.onDisconnected;
+    this.onAuthError = options.onAuthError;
   }
 
   /**
@@ -51,6 +63,9 @@ export class RatatoskrNetworkAdapter extends NetworkAdapter {
     if (this.socket) {
       return;
     }
+
+    // Notify connecting
+    this.onConnecting?.();
 
     // Convert HTTP URL to WebSocket URL
     const wsUrl = this.serverUrl
@@ -91,6 +106,9 @@ export class RatatoskrNetworkAdapter extends NetworkAdapter {
         this.serverPeerId =
           (message.peerId as string as PeerId) ?? ("server" as PeerId);
 
+        // Notify connected
+        this.onConnected?.();
+
         // Announce server as peer
         this.emit("peer-candidate", {
           peerId: this.serverPeerId,
@@ -101,7 +119,9 @@ export class RatatoskrNetworkAdapter extends NetworkAdapter {
       }
 
       if (message.type === "auth_error") {
-        console.error("Authentication failed:", message.message);
+        const errorMsg = (message.message as string) || "Authentication failed";
+        console.error("Authentication failed:", errorMsg);
+        this.onAuthError?.(errorMsg);
         this.socket?.close();
         return;
       }
@@ -118,6 +138,9 @@ export class RatatoskrNetworkAdapter extends NetworkAdapter {
     this.socket.onclose = () => {
       this.ready = false;
       this.socket = null;
+
+      // Notify disconnected
+      this.onDisconnected?.();
 
       if (this.serverPeerId) {
         this.emit("peer-disconnected", { peerId: this.serverPeerId });
