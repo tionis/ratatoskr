@@ -36,3 +36,4 @@ bun.lockb
 # Agent state files (local only)
 STATE.md
 WORK_LOG.md
+.test-data

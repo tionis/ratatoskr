@@ -6,12 +6,14 @@
  */
 
 import { type PeerId, Repo } from "@automerge/automerge-repo";
+import { config } from "../config.ts";
 import { ephemeralManager } from "./ephemeral.ts";
 import { ServerNetworkAdapter } from "./network-adapter.ts";
-import { RatatoskrStorageAdapter } from "./storage-adapter.ts";
+import { SqliteStorageAdapter } from "./sqlite-storage-adapter.ts";
 
 let repo: Repo | null = null;
 let networkAdapter: ServerNetworkAdapter | null = null;
+let storageAdapter: SqliteStorageAdapter | null = null;
 
 /**
  * Initialize the automerge-repo instance.
@@ -24,15 +26,15 @@ export function initRepo(): {
     return { repo, networkAdapter };
   }
 
-  // Create storage adapter
-  const storage = new RatatoskrStorageAdapter();
+  // Create storage adapter (SQLite-backed to avoid inode exhaustion)
+  storageAdapter = new SqliteStorageAdapter(config.dataDir);
 
   // Create network adapter
   networkAdapter = new ServerNetworkAdapter();
 
   // Create repo
   repo = new Repo({
-    storage,
+    storage: storageAdapter,
     network: [networkAdapter],
     peerId: `server-${crypto.randomUUID()}` as PeerId,
     // Server should share all documents it has
@@ -72,5 +74,11 @@ export function shutdownRepo(): void {
     networkAdapter.disconnect();
     networkAdapter = null;
   }
+
+  if (storageAdapter) {
+    storageAdapter.close();
+    storageAdapter = null;
+  }
+
   repo = null;
 }
