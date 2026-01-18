@@ -90,8 +90,8 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
       const userId = oidcUser.preferredUsername || oidcUser.sub;
       const user = createUser({
         id: userId,
-        email: oidcUser.email,
-        name: oidcUser.name,
+        email: oidcUser.email ?? null,
+        name: oidcUser.name ?? null,
       });
 
       // Create session token

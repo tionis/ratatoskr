@@ -109,8 +109,10 @@ export async function handleCallback(
 
   return {
     sub: claims.sub,
-    email: claims.email as string | undefined,
-    name: claims.name as string | undefined,
-    preferredUsername: claims.preferred_username as string | undefined,
+    ...(typeof claims.email === "string" ? { email: claims.email } : {}),
+    ...(typeof claims.name === "string" ? { name: claims.name } : {}),
+    ...(typeof claims.preferred_username === "string"
+      ? { preferredUsername: claims.preferred_username }
+      : {}),
   };
 }

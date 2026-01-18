@@ -78,7 +78,10 @@ export async function documentRoutes(fastify: FastifyInstance): Promise<void> {
     }
 
     const quotaCheck = await checkDocumentCreationQuota(
-      { getUserDocumentCount, getUserTotalStorage },
+      {
+        getUserDocumentCount: async (uid) => getUserDocumentCount(uid),
+        getUserTotalStorage: async (uid) => getUserTotalStorage(uid),
+      },
       user,
     );
 
@@ -93,7 +96,11 @@ export async function documentRoutes(fastify: FastifyInstance): Promise<void> {
     }
 
     // Create document
-    const doc = createDocument({ id, ownerId: userId, type });
+    const doc = createDocument({
+      id,
+      ownerId: userId,
+      ...(type ? { type } : {}),
+    });
 
     // Set ACL if provided
     if (acl && acl.length > 0) {
@@ -208,15 +215,13 @@ export async function documentRoutes(fastify: FastifyInstance): Promise<void> {
         if (format === "json") {
           return {};
         }
-        return reply
-          .header("Content-Type", "application/octet-stream")
-          .send(new Uint8Array(0));
+        return reply.header("Content-Type", "application/octet-stream").send(new Uint8Array(0));
       }
 
       if (format === "json") {
         try {
           const automergeDoc = Automerge.load(data);
-          return Automerge.view(automergeDoc);
+          return Automerge.view(automergeDoc, Automerge.getHeads(automergeDoc));
         } catch (err) {
           reply.code(500).send({
             error: "internal_error",

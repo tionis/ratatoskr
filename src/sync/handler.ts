@@ -31,7 +31,7 @@ export async function syncHandler(
     cleanup();
   });
 
-  socket.on("error", (err) => {
+  socket.on("error", (err: Error) => {
     request.log.error(err, "WebSocket error");
     cleanup();
   });

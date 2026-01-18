@@ -12,8 +12,9 @@ Guidelines for LLM agents working on this repository.
 
 - **Update `STATE.md`** when you complete features or discover issues
 - **Update documentation** in `docs/` and `README.md` when changing behavior
-- **Run tests** with `bun test` before committing
+- **Run tests** with `bun test` before committing. Ensure all tests pass.
 - **Run linting** with `bun run lint` or `bun run lint:fix` before committing. Ensure all checks pass.
+- **Run typecheck** with `bun run typecheck` before committing. Ensure there are no errors.
 
 ## After Work
 

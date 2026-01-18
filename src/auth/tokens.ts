@@ -131,7 +131,7 @@ export function verifyApiToken(token: string): string | null {
     .prepare(
       "UPDATE api_tokens SET last_used_at = datetime('now') WHERE id = ?",
     )
-    .run(row.id);
+    .run(row.id as string);
 
   return row.user_id as string;
 }

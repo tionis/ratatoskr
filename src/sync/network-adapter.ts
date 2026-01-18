@@ -39,9 +39,9 @@ export class ServerNetworkAdapter extends NetworkAdapter {
 
   connect(peerId: PeerId, peerMetadata?: PeerMetadata): void {
     this.peerId = peerId;
-    this.peerMetadata = peerMetadata;
+    this.peerMetadata = peerMetadata ?? {};
     this.ready = true;
-    this.emit("ready", { network: this });
+    this.emit("ready" as any, { network: this });
   }
 
   disconnect(): void {
@@ -71,7 +71,7 @@ export class ServerNetworkAdapter extends NetworkAdapter {
   async whenReady(): Promise<void> {
     if (this.ready) return;
     return new Promise((resolve) => {
-      this.once("ready", () => resolve());
+      this.once("ready" as any, () => resolve(undefined));
     });
   }
 
