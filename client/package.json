@@ -1,6 +1,6 @@
 {
   "name": "ratatoskr-client",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Browser client library for Ratatoskr - automerge-repo sync server with authentication",
   "type": "module",
   "main": "./dist/index.js",
