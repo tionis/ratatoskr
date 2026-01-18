@@ -579,42 +579,42 @@
     // Direct window.open doesn't allow setting headers easily for Bearer token.
     // However, if we use a cookie-based auth or query param token, it works.
     // Since this is a simple UI, we'll try to use the fetch to get a blob and download it.
-    
+
     // For simplicity in this demo, we can just use the API if it supports cookie auth or similar.
     // The server has cookie support (@fastify/cookie registered), but we use Bearer in `api()` helper.
     // To support download with Bearer token, we need to fetch -> blob -> objectURL -> click.
 
     const url = `/api/v1/documents/${encodeURIComponent(docId)}/export?format=${format}`;
-    
+
     fetch(url, {
       headers: {
-        Authorization: `Bearer ${authToken}`
-      }
+        Authorization: `Bearer ${authToken}`,
+      },
     })
-    .then(response => {
-      if (!response.ok) throw new Error("Download failed");
-      return response.blob();
-    })
-    .then(blob => {
-      const downloadUrl = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = downloadUrl;
-      a.download = `${docId.split(':').pop()}.${format === 'json' ? 'json' : 'amrg'}`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(downloadUrl);
-      a.remove();
-    })
-    .catch(err => {
-      showToast(err.message, "error");
-    });
+      .then((response) => {
+        if (!response.ok) throw new Error("Download failed");
+        return response.blob();
+      })
+      .then((blob) => {
+        const downloadUrl = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = downloadUrl;
+        a.download = `${docId.split(":").pop()}.${format === "json" ? "json" : "amrg"}`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(downloadUrl);
+        a.remove();
+      })
+      .catch((err) => {
+        showToast(err.message, "error");
+      });
   };
 
   // Edit Document Type
   window.editDocumentType = async (docId) => {
     currentEditingDocId = docId;
     document.getElementById("edit-type-doc-id").textContent = docId;
-    
+
     // Clear previous value
     document.getElementById("edit-doc-type").value = "Loading...";
     openModal("edit-type-modal");
