@@ -7,6 +7,8 @@
   "scripts": {
     "dev": "bun run --watch src/index.ts",
     "start": "bun run src/index.ts",
+    "build:client": "cd client && bun run build:bundle",
+    "build:binary": "bun run scripts/build-binary.ts",
     "test": "bun test",
     "test:watch": "bun test --watch",
     "lint": "biome check .",
