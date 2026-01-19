@@ -47,6 +47,7 @@
   },
   "devDependencies": {
     "@automerge/automerge-repo": "^2.5.1",
+    "fake-indexeddb": "^6.2.5",
     "typescript": "^5.9.3"
   }
 }
