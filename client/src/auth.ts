@@ -72,13 +72,26 @@ export function authenticate(serverUrl: string): Promise<AuthResult> {
     window.addEventListener("message", handleMessage);
 
     // Check if popup was closed without completing auth
-    const checkClosed = setInterval(() => {
-      if (popup.closed) {
-        clearInterval(checkClosed);
-        window.removeEventListener("message", handleMessage);
-        reject(new Error("Authentication cancelled: Popup was closed"));
-      }
-    }, 500);
+    // We use a try-catch because accessing popup.closed can throw during
+    // cross-origin navigation (e.g., when redirecting to OIDC provider).
+    // We also delay the first check to allow for initial redirects.
+    let checkClosed: ReturnType<typeof setInterval>;
+    const startChecking = () => {
+      checkClosed = setInterval(() => {
+        try {
+          if (popup.closed) {
+            clearInterval(checkClosed);
+            window.removeEventListener("message", handleMessage);
+            reject(new Error("Authentication cancelled: Popup was closed"));
+          }
+        } catch {
+          // Cross-origin access error - popup is still open but navigated to different origin
+          // This is expected during OIDC flow, so we just continue waiting
+        }
+      }, 500);
+    };
+    // Delay initial check to allow for redirects
+    setTimeout(startChecking, 1000);
 
     // Timeout after 5 minutes
     setTimeout(
