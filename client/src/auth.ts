@@ -57,6 +57,12 @@ export function authenticate(serverUrl: string): Promise<AuthResult> {
       window.removeEventListener("message", handleMessage);
       clearInterval(checkClosed);
 
+      // Handle user denial
+      if (data.error) {
+        reject(new Error(data.error));
+        return;
+      }
+
       if (data.token && data.user) {
         resolve({
           token: data.token,
@@ -75,6 +81,7 @@ export function authenticate(serverUrl: string): Promise<AuthResult> {
     // We use a try-catch because accessing popup.closed can throw during
     // cross-origin navigation (e.g., when redirecting to OIDC provider).
     // We also delay the first check to allow for initial redirects.
+    // Note: No timeout is used since user confirmation may take variable time.
     let checkClosed: ReturnType<typeof setInterval>;
     const startChecking = () => {
       checkClosed = setInterval(() => {
@@ -92,19 +99,6 @@ export function authenticate(serverUrl: string): Promise<AuthResult> {
     };
     // Delay initial check to allow for redirects
     setTimeout(startChecking, 1000);
-
-    // Timeout after 5 minutes
-    setTimeout(
-      () => {
-        if (!popup.closed) {
-          popup.close();
-        }
-        clearInterval(checkClosed);
-        window.removeEventListener("message", handleMessage);
-        reject(new Error("Authentication timeout"));
-      },
-      5 * 60 * 1000,
-    );
   });
 }
 

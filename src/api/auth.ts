@@ -96,26 +96,149 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
 
       // Create session token
       const token = createSessionToken(user.id);
+      const userJson = JSON.stringify({
+        id: user.id,
+        email: user.email,
+        name: user.name,
+      });
 
-      // For popup flow, return HTML that posts message to opener
+      // Show confirmation page before sending credentials to opener
       return reply.type("text/html").send(`
         <!DOCTYPE html>
         <html>
-        <head><title>Authentication Complete</title></head>
+        <head>
+          <title>Confirm Login</title>
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <style>
+            * { box-sizing: border-box; margin: 0; padding: 0; }
+            body {
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+              background: #1a1a2e;
+              color: #eaeaea;
+              min-height: 100vh;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              padding: 1rem;
+            }
+            .card {
+              background: #16213e;
+              border-radius: 12px;
+              padding: 2rem;
+              max-width: 400px;
+              width: 100%;
+              text-align: center;
+              box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            }
+            .avatar {
+              width: 64px;
+              height: 64px;
+              background: #4f9cf9;
+              border-radius: 50%;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              margin: 0 auto 1rem;
+              font-size: 1.5rem;
+            }
+            h1 { font-size: 1.25rem; margin-bottom: 0.5rem; }
+            .user-info { color: #a0a0a0; margin-bottom: 1.5rem; }
+            .user-name { color: #4f9cf9; font-weight: 600; }
+            .origin-box {
+              background: #1a1a2e;
+              border: 1px solid #2a2a4a;
+              border-radius: 8px;
+              padding: 1rem;
+              margin-bottom: 1.5rem;
+              word-break: break-all;
+            }
+            .origin-label { font-size: 0.75rem; color: #a0a0a0; margin-bottom: 0.25rem; }
+            .origin-value { font-family: monospace; color: #4ade80; }
+            .warning {
+              font-size: 0.875rem;
+              color: #fbbf24;
+              margin-bottom: 1.5rem;
+            }
+            .buttons { display: flex; gap: 1rem; }
+            button {
+              flex: 1;
+              padding: 0.75rem 1rem;
+              border: none;
+              border-radius: 8px;
+              font-size: 1rem;
+              font-weight: 600;
+              cursor: pointer;
+              transition: opacity 0.2s;
+            }
+            button:hover { opacity: 0.9; }
+            .btn-approve { background: #4f9cf9; color: white; }
+            .btn-deny { background: #4a4a6a; color: #eaeaea; }
+            .no-opener {
+              color: #f87171;
+              padding: 1rem;
+            }
+          </style>
+        </head>
         <body>
+          <div class="card" id="confirm-card">
+            <div class="avatar">${user.name?.[0]?.toUpperCase() || user.id[0]?.toUpperCase() || "?"}</div>
+            <h1>Confirm Login</h1>
+            <p class="user-info">
+              Logged in as <span class="user-name">${user.name || user.id}</span>
+            </p>
+            <div class="origin-box">
+              <div class="origin-label">Application requesting access:</div>
+              <div class="origin-value" id="origin">Loading...</div>
+            </div>
+            <p class="warning">
+              Only approve if you trust this application.
+            </p>
+            <div class="buttons">
+              <button class="btn-deny" onclick="deny()">Deny</button>
+              <button class="btn-approve" onclick="approve()">Approve</button>
+            </div>
+          </div>
+          <div class="card no-opener" id="no-opener" style="display:none;">
+            <h1>Authentication Successful</h1>
+            <p>You can close this window.</p>
+          </div>
           <script>
-            if (window.opener) {
-              window.opener.postMessage({
-                type: 'ratatoskr:auth',
-                token: '${token}',
-                user: ${JSON.stringify({ id: user.id, email: user.email, name: user.name })}
-              }, '*');
-              window.close();
+            const token = '${token}';
+            const user = ${userJson};
+
+            // Check if opened as popup
+            if (!window.opener) {
+              document.getElementById('confirm-card').style.display = 'none';
+              document.getElementById('no-opener').style.display = 'block';
             } else {
-              document.body.innerHTML = '<p>Authentication successful. You can close this window.</p>';
+              // Show the opener's origin
+              // Note: We can't directly access opener.location due to cross-origin restrictions
+              // Instead, we use document.referrer or let the client provide origin in state
+              const openerOrigin = document.referrer ? new URL(document.referrer).origin : 'Unknown origin';
+              document.getElementById('origin').textContent = openerOrigin;
+            }
+
+            function approve() {
+              if (window.opener) {
+                window.opener.postMessage({
+                  type: 'ratatoskr:auth',
+                  token: token,
+                  user: user
+                }, '*');
+              }
+              window.close();
+            }
+
+            function deny() {
+              if (window.opener) {
+                window.opener.postMessage({
+                  type: 'ratatoskr:auth',
+                  error: 'User denied the login request'
+                }, '*');
+              }
+              window.close();
             }
           </script>
-          <p>Authentication successful. This window should close automatically.</p>
         </body>
         </html>
       `);
