@@ -19,6 +19,7 @@
   "scripts": {
     "build": "bun build ./src/index.ts --outdir ./dist --target browser --format esm --external @automerge/automerge-repo --external @automerge/automerge && bun run build:types",
     "build:types": "tsc",
+    "build:bundle": "node build-browser.mjs",
     "test": "bun test",
     "prepublishOnly": "bun run build"
   },
@@ -47,6 +48,7 @@
   },
   "devDependencies": {
     "@automerge/automerge-repo": "^2.5.1",
+    "esbuild": "^0.27.2",
     "fake-indexeddb": "^6.2.5",
     "typescript": "^5.9.3"
   }

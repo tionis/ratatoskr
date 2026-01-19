@@ -233,10 +233,10 @@
     <section id="quickstart">
       <h2>Quick Start</h2>
 
-      <p>The fastest way to get started is with a direct ESM import (no build step required):</p>
+      <p>The fastest way to get started is with a direct ESM import from this server (no build step required):</p>
 
       <pre><code class="language-html">&lt;script type="module"&gt;
-import { RatatoskrClient } from 'https://esm.sh/ratatoskr-client';
+import { RatatoskrClient } from '{{SERVER_URL}}/ui/lib/ratatoskr-client.js';
 
 const client = new RatatoskrClient({
   serverUrl: '{{SERVER_URL}}'
@@ -265,8 +265,9 @@ console.log('My documents:', owned);
       <h2>Installation</h2>
 
       <h3>Option 1: Direct ESM Import (Recommended for HTML tools)</h3>
-      <p>No installation needed. Import directly from a CDN:</p>
-      <pre><code class="language-javascript">import { RatatoskrClient } from 'https://esm.sh/ratatoskr-client';</code></pre>
+      <p>No installation needed. Import directly from this server:</p>
+      <pre><code class="language-javascript">import { RatatoskrClient } from '{{SERVER_URL}}/ui/lib/ratatoskr-client.js';</code></pre>
+      <p>This bundle includes all dependencies (including automerge) so there's nothing else to install.</p>
 
       <h3>Option 2: npm/bun/yarn</h3>
       <pre><code class="language-bash">npm install ratatoskr-client @automerge/automerge-repo</code></pre>
@@ -632,14 +633,6 @@ interface SyncEvent {
 &lt;html&gt;
 &lt;head&gt;
   &lt;title&gt;My Collaborative Tool&lt;/title&gt;
-  &lt;script type="importmap"&gt;
-    {
-      "imports": {
-        "ratatoskr-client": "https://esm.sh/ratatoskr-client?external=@automerge/automerge-repo",
-        "@automerge/automerge-repo": "https://esm.sh/@automerge/automerge-repo"
-      }
-    }
-  &lt;/script&gt;
 &lt;/head&gt;
 &lt;body&gt;
   &lt;button id="login"&gt;Login&lt;/button&gt;
@@ -647,7 +640,7 @@ interface SyncEvent {
   &lt;div id="output"&gt;&lt;/div&gt;
 
   &lt;script type="module"&gt;
-    import { RatatoskrClient } from 'ratatoskr-client';
+    import { RatatoskrClient } from '{{SERVER_URL}}/ui/lib/ratatoskr-client.js';
 
     const client = new RatatoskrClient({
       serverUrl: '{{SERVER_URL}}'
@@ -689,7 +682,7 @@ interface SyncEvent {
 &lt;/html&gt;</code></pre>
 
       <h3>Real-Time Collaboration with Automerge</h3>
-      <pre><code class="language-javascript">import { RatatoskrClient } from 'ratatoskr-client';
+      <pre><code class="language-javascript">import { RatatoskrClient } from '{{SERVER_URL}}/ui/lib/ratatoskr-client.js';
 
 const client = new RatatoskrClient({
   serverUrl: '{{SERVER_URL}}'
