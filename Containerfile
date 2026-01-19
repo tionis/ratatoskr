@@ -12,6 +12,9 @@ COPY package.json bun.lock* ./
 RUN bun install --frozen-lockfile
 COPY . .
 
+# Build the browser client bundle
+RUN cd client && bun install --frozen-lockfile && bun run build:bundle
+
 # Production image
 FROM base AS runner
 WORKDIR /app
