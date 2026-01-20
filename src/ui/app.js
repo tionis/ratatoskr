@@ -1,759 +1,711 @@
-// Ratatoskr Notes - Collaborative Document Editor
-import { RatatoskrClient } from "/ui/lib/ratatoskr-client.js";
+// Ratatoskr UI Application
+(() => {
+  // State
+  let authToken = null;
+  let currentUser = null;
+  let currentTokens = [];
+  let currentAclDocId = null;
+  let currentAclEntries = [];
+  let pendingConfirmCallback = null;
+  let currentEditingDocId = null;
 
-// Initialize client
-const client = new RatatoskrClient({
-  serverUrl: window.location.origin,
-  autoReconnect: true,
-});
+  // DOM Elements
+  const loginScreen = document.getElementById("login-screen");
+  const dashboard = document.getElementById("dashboard");
+  const loginBtn = document.getElementById("login-btn");
+  const logoutBtn = document.getElementById("logout-btn");
+  const userInfo = document.getElementById("user-info");
+  const navBtns = document.querySelectorAll(".nav-btn");
+  const tabContents = document.querySelectorAll(".tab-content");
+  const toastContainer = document.getElementById("toast-container");
 
-// App State
-let currentUser = null;
-let currentDocId = null;
-let currentDocHandle = null;
-let currentAcl = [];
-let isOwner = false;
-let documents = { owned: [], accessible: [] };
-let pendingConfirmCallback = null;
+  // API Helper
+  async function api(method, path, body = null) {
+    const headers = {};
 
-// DOM Elements
-const loginScreen = document.getElementById("login-screen");
-const mainApp = document.getElementById("main-app");
-const welcomeView = document.getElementById("welcome-view");
-const editorView = document.getElementById("editor-view");
-const editor = document.getElementById("editor");
-const toastContainer = document.getElementById("toast-container");
-
-// ============ Utility Functions ============
-
-function showToast(message, type = "info") {
-  const toast = document.createElement("div");
-  toast.className = `toast ${type}`;
-  toast.textContent = message;
-  toastContainer.appendChild(toast);
-  setTimeout(() => toast.remove(), 4000);
-}
-
-function openModal(id) {
-  document.getElementById(id).classList.remove("hidden");
-}
-
-function closeModal(id) {
-  document.getElementById(id).classList.add("hidden");
-}
-
-function closeAllModals() {
-  document.querySelectorAll(".modal").forEach((m) => {
-    m.classList.add("hidden");
-  });
-}
-
-function escapeHtml(text) {
-  const div = document.createElement("div");
-  div.textContent = text || "";
-  return div.innerHTML;
-}
-
-function formatDate(isoString) {
-  if (!isoString) return "Never";
-  return new Date(isoString).toLocaleDateString();
-}
-
-function formatBytes(bytes) {
-  if (bytes === 0) return "0 B";
-  const k = 1024;
-  const sizes = ["B", "KB", "MB", "GB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${parseFloat((bytes / k ** i).toFixed(2))} ${sizes[i]}`;
-}
-
-function generateId() {
-  return `doc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
-}
-
-// ============ API Helper ============
-
-async function api(method, path, body = null) {
-  const token = client.getToken();
-  const headers = {};
-  if (token) headers.Authorization = `Bearer ${token}`;
-
-  const options = { method, headers };
-  if (body) {
-    headers["Content-Type"] = "application/json";
-    options.body = JSON.stringify(body);
-  }
-
-  const response = await fetch(`/api/v1${path}`, options);
-  if (response.status === 204) return null;
-
-  const data = await response.json();
-  if (!response.ok)
-    throw new Error(data.message || data.error || "Request failed");
-  return data;
-}
-
-// ============ Authentication ============
-
-async function checkAuth() {
-  if (client.isLoggedIn()) {
-    currentUser = client.getUser();
-    showMainApp();
-    await loadDocuments();
-  } else {
-    showLogin();
-  }
-}
-
-function showLogin() {
-  loginScreen.classList.remove("hidden");
-  mainApp.classList.add("hidden");
-}
-
-function showMainApp() {
-  loginScreen.classList.add("hidden");
-  mainApp.classList.remove("hidden");
-  document.getElementById("user-name").textContent =
-    currentUser?.name || currentUser?.email || currentUser?.id || "User";
-}
-
-async function handleLogin() {
-  try {
-    await client.login();
-    currentUser = client.getUser();
-    showMainApp();
-    await loadDocuments();
-    showToast("Welcome back!", "success");
-  } catch (err) {
-    showToast(err.message, "error");
-  }
-}
-
-function handleLogout() {
-  client.logout();
-  currentUser = null;
-  closeDocument();
-  showLogin();
-  showToast("Logged out", "info");
-}
-
-// ============ Document List ============
-
-async function loadDocuments() {
-  const ownedList = document.getElementById("owned-docs-list");
-  const sharedList = document.getElementById("shared-docs-list");
-
-  ownedList.innerHTML = '<div class="loading-small">Loading...</div>';
-  sharedList.innerHTML = '<div class="loading-small">Loading...</div>';
-
-  try {
-    const data = await api("GET", "/documents");
-    documents = data;
-    renderDocumentList(ownedList, data.owned, true);
-    renderDocumentList(sharedList, data.accessible, false);
-  } catch (_err) {
-    ownedList.innerHTML = `<div class="empty-state-small">Failed to load</div>`;
-    sharedList.innerHTML = "";
-    showToast("Failed to load documents", "error");
-  }
-}
-
-function renderDocumentList(container, docs, owned) {
-  if (docs.length === 0) {
-    container.innerHTML = `<div class="empty-state-small">${owned ? "No documents yet" : "None shared"}</div>`;
-    return;
-  }
-
-  container.innerHTML = docs
-    .map((doc) => {
-      const title = getDocTitle(doc);
-      const isActive = doc.id === currentDocId;
-      return `
-        <div class="doc-item ${isActive ? "active" : ""}" data-id="${escapeHtml(doc.id)}">
-          <div class="doc-item-icon">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
-              <polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/>
-              <line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>
-            </svg>
-          </div>
-          <div class="doc-item-info">
-            <span class="doc-item-title">${escapeHtml(title)}</span>
-            <span class="doc-item-meta">${formatDate(doc.updatedAt || doc.createdAt)}</span>
-          </div>
-        </div>
-      `;
-    })
-    .join("");
-
-  // Add click handlers
-  container.querySelectorAll(".doc-item").forEach((item) => {
-    item.addEventListener("click", () => openDocument(item.dataset.id));
-  });
-}
-
-function getDocTitle(doc) {
-  // Try to get title from document content or fall back to ID
-  return (
-    doc.title || doc.id.replace(/^doc[:-]/, "").replace(/-/g, " ") || "Untitled"
-  );
-}
-
-// ============ Document Operations ============
-
-async function createDocument(title, customId) {
-  const id = customId || `doc:${generateId()}`;
-
-  try {
-    // Create document via API
-    await api("POST", "/documents", { id, type: "note" });
-
-    // Initialize with title using automerge
-    const handle = await client.getDocument(id);
-    handle.change((doc) => {
-      doc.title = title || "Untitled";
-      doc.content = "";
-      doc.createdAt = new Date().toISOString();
-      doc.updatedAt = new Date().toISOString();
-    });
-
-    await loadDocuments();
-    await openDocument(id);
-    showToast("Document created", "success");
-  } catch (err) {
-    showToast(err.message, "error");
-  }
-}
-
-async function openDocument(docId) {
-  // Close previous document if open
-  if (currentDocHandle) {
-    currentDocHandle.off("change", handleDocumentChange);
-  }
-
-  currentDocId = docId;
-  isOwner = documents.owned.some((d) => d.id === docId);
-
-  // Update UI
-  welcomeView.classList.add("hidden");
-  editorView.classList.remove("hidden");
-
-  // Update sidebar active state
-  document.querySelectorAll(".doc-item").forEach((item) => {
-    item.classList.toggle("active", item.dataset.id === docId);
-  });
-
-  // Show/hide owner-only buttons
-  document.getElementById("share-btn").style.display = isOwner ? "" : "none";
-  document.getElementById("delete-doc-btn").style.display = isOwner
-    ? ""
-    : "none";
-
-  // Set sync status to loading
-  setSyncStatus("syncing");
-
-  try {
-    // Get document handle from automerge-repo
-    currentDocHandle = await client.getDocument(docId);
-
-    // Load initial content
-    const doc = currentDocHandle.docSync();
-    if (doc) {
-      document.getElementById("doc-title-input").value = doc.title || "";
-      editor.value = doc.content || "";
-      updateCharCount();
+    if (authToken) {
+      headers.Authorization = `Bearer ${authToken}`;
     }
 
-    // Listen for changes (from other collaborators)
-    currentDocHandle.on("change", handleDocumentChange);
-
-    setSyncStatus("synced");
-  } catch (err) {
-    showToast(`Failed to open document: ${err.message}`, "error");
-    setSyncStatus("error");
-  }
-}
-
-function handleDocumentChange({ doc }) {
-  // Update editor if content changed from remote
-  const currentContent = editor.value;
-  const newContent = doc.content || "";
-
-  if (newContent !== currentContent) {
-    // Preserve cursor position as best we can
-    const selStart = editor.selectionStart;
-    const selEnd = editor.selectionEnd;
-
-    editor.value = newContent;
-
-    // Try to restore cursor position
-    editor.selectionStart = Math.min(selStart, newContent.length);
-    editor.selectionEnd = Math.min(selEnd, newContent.length);
-  }
-
-  // Update title if changed
-  const titleInput = document.getElementById("doc-title-input");
-  if (doc.title && doc.title !== titleInput.value) {
-    titleInput.value = doc.title;
-  }
-
-  updateCharCount();
-  setSyncStatus("synced");
-}
-
-function closeDocument() {
-  if (currentDocHandle) {
-    currentDocHandle.off("change", handleDocumentChange);
-    currentDocHandle = null;
-  }
-  currentDocId = null;
-
-  welcomeView.classList.remove("hidden");
-  editorView.classList.add("hidden");
-
-  document.querySelectorAll(".doc-item").forEach((item) => {
-    item.classList.remove("active");
-  });
-}
-
-async function deleteDocument(docId) {
-  try {
-    await api("DELETE", `/documents/${encodeURIComponent(docId)}`);
-    showToast("Document deleted", "success");
-
-    if (currentDocId === docId) {
-      closeDocument();
+    const options = { method, headers };
+    if (body) {
+      headers["Content-Type"] = "application/json";
+      options.body = JSON.stringify(body);
     }
-    await loadDocuments();
-  } catch (err) {
-    showToast(err.message, "error");
+
+    const response = await fetch(`/api/v1${path}`, options);
+
+    if (response.status === 204) {
+      return null;
+    }
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.message || data.error || "Request failed");
+    }
+
+    return data;
   }
-}
 
-// ============ Editor ============
+  // Toast Notifications
+  function showToast(message, type = "info") {
+    const toast = document.createElement("div");
+    toast.className = `toast ${type}`;
+    toast.textContent = message;
+    toastContainer.appendChild(toast);
 
-let saveTimeout = null;
+    setTimeout(() => {
+      toast.remove();
+    }, 4000);
+  }
 
-function handleEditorInput() {
-  if (!currentDocHandle) return;
+  // Modal Helpers
+  function openModal(modalId) {
+    document.getElementById(modalId).classList.remove("hidden");
+  }
 
-  setSyncStatus("syncing");
+  function closeModal(modalId) {
+    document.getElementById(modalId).classList.add("hidden");
+  }
 
-  // Debounce saves
-  clearTimeout(saveTimeout);
-  saveTimeout = setTimeout(() => {
-    const content = editor.value;
-    currentDocHandle.change((doc) => {
-      doc.content = content;
-      doc.updatedAt = new Date().toISOString();
+  function closeAllModals() {
+    document.querySelectorAll(".modal").forEach((m) => {
+      m.classList.add("hidden");
     });
-    setSyncStatus("synced");
-  }, 300);
-
-  updateCharCount();
-}
-
-function handleTitleChange() {
-  if (!currentDocHandle) return;
-
-  const title = document.getElementById("doc-title-input").value;
-  currentDocHandle.change((doc) => {
-    doc.title = title;
-    doc.updatedAt = new Date().toISOString();
-  });
-
-  // Update sidebar
-  loadDocuments();
-}
-
-function updateCharCount() {
-  const count = editor.value.length;
-  document.getElementById("char-count").textContent =
-    `${count.toLocaleString()} characters`;
-}
-
-function setSyncStatus(status) {
-  const statusEl = document.getElementById("sync-status");
-  const _dotEl = statusEl.querySelector(".sync-dot");
-  const textEl = statusEl.querySelector(".sync-text");
-
-  statusEl.className = `sync-status ${status}`;
-
-  switch (status) {
-    case "synced":
-      textEl.textContent = "Synced";
-      break;
-    case "syncing":
-      textEl.textContent = "Saving...";
-      break;
-    case "error":
-      textEl.textContent = "Error";
-      break;
-    case "offline":
-      textEl.textContent = "Offline";
-      break;
   }
-}
 
-// ============ Sharing / ACL ============
+  // Format bytes
+  function formatBytes(bytes) {
+    if (bytes === 0) return "0 B";
+    const k = 1024;
+    const sizes = ["B", "KB", "MB", "GB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return `${parseFloat((bytes / k ** i).toFixed(2))} ${sizes[i]}`;
+  }
 
-async function openShareModal() {
-  if (!currentDocId || !isOwner) return;
+  // Format date
+  function formatDate(isoString) {
+    if (!isoString) return "Never";
+    return new Date(isoString).toLocaleString();
+  }
 
-  document.getElementById("share-doc-title").textContent =
-    document.getElementById("doc-title-input").value || currentDocId;
+  // Auth Functions
+  function checkAuth() {
+    const stored = sessionStorage.getItem("ratatoskr_token");
+    const storedUser = sessionStorage.getItem("ratatoskr_user");
 
-  openModal("share-modal");
+    if (stored && storedUser) {
+      authToken = stored;
+      currentUser = JSON.parse(storedUser);
+      showDashboard();
+      loadAllData();
+    } else {
+      showLogin();
+    }
+  }
 
-  const shareList = document.getElementById("share-list");
-  shareList.innerHTML = '<div class="loading-small">Loading...</div>';
+  function showLogin() {
+    loginScreen.classList.remove("hidden");
+    dashboard.classList.add("hidden");
+  }
 
-  try {
-    const data = await api(
-      "GET",
-      `/documents/${encodeURIComponent(currentDocId)}/acl`,
+  function showDashboard() {
+    loginScreen.classList.add("hidden");
+    dashboard.classList.remove("hidden");
+    userInfo.textContent = currentUser?.email || currentUser?.name || "User";
+  }
+
+  function handleLogin() {
+    // Open popup for OIDC login
+    const width = 500;
+    const height = 600;
+    const left = window.screenX + (window.outerWidth - width) / 2;
+    const top = window.screenY + (window.outerHeight - height) / 2;
+
+    window.open(
+      "/api/v1/auth/login",
+      "ratatoskr_auth",
+      `width=${width},height=${height},left=${left},top=${top}`,
     );
-    currentAcl = data.acl || [];
-    renderShareList();
-  } catch (_err) {
-    shareList.innerHTML = '<div class="empty-state-small">Failed to load</div>';
-    showToast("Failed to load sharing settings", "error");
-  }
-}
 
-function renderShareList() {
-  const container = document.getElementById("share-list");
+    // Listen for auth message
+    const messageHandler = (event) => {
+      if (event.data?.type === "ratatoskr:auth") {
+        window.removeEventListener("message", messageHandler);
 
-  // Check for public access
-  const publicEntry = currentAcl.find((e) => e.principal === "public");
-  document.getElementById("public-read-toggle").checked = !!publicEntry;
+        authToken = event.data.token;
+        currentUser = event.data.user;
 
-  // Filter out public entry for the list
-  const userEntries = currentAcl.filter((e) => e.principal !== "public");
+        sessionStorage.setItem("ratatoskr_token", authToken);
+        sessionStorage.setItem("ratatoskr_user", JSON.stringify(currentUser));
 
-  if (userEntries.length === 0) {
-    container.innerHTML =
-      '<div class="empty-state-small">No one else has access</div>';
-    return;
-  }
-
-  container.innerHTML = userEntries
-    .map(
-      (entry, idx) => `
-      <div class="share-entry" data-principal="${escapeHtml(entry.principal)}">
-        <div class="share-entry-info">
-          <span class="share-entry-user">${escapeHtml(entry.principal)}</span>
-          <select class="share-entry-permission" data-idx="${idx}">
-            <option value="read" ${entry.permission === "read" ? "selected" : ""}>Can view</option>
-            <option value="write" ${entry.permission === "write" ? "selected" : ""}>Can edit</option>
-          </select>
-        </div>
-        <button class="btn btn-danger btn-small share-remove-btn" data-principal="${escapeHtml(entry.principal)}">Remove</button>
-      </div>
-    `,
-    )
-    .join("");
-
-  // Add event listeners
-  container.querySelectorAll(".share-entry-permission").forEach((select) => {
-    select.addEventListener("change", (e) => {
-      const idx = parseInt(e.target.dataset.idx, 10);
-      const entry = userEntries[idx];
-      const aclIdx = currentAcl.findIndex(
-        (e) => e.principal === entry.principal,
-      );
-      if (aclIdx >= 0) {
-        currentAcl[aclIdx].permission = e.target.value;
+        showDashboard();
+        loadAllData();
+        showToast("Successfully logged in", "success");
       }
+    };
+
+    window.addEventListener("message", messageHandler);
+  }
+
+  function handleLogout() {
+    authToken = null;
+    currentUser = null;
+    sessionStorage.removeItem("ratatoskr_token");
+    sessionStorage.removeItem("ratatoskr_user");
+    showLogin();
+    showToast("Logged out", "info");
+  }
+
+  // Tab Navigation
+  function switchTab(tabName) {
+    navBtns.forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.tab === tabName);
     });
-  });
 
-  container.querySelectorAll(".share-remove-btn").forEach((btn) => {
-    btn.addEventListener("click", (e) => {
-      const principal = e.target.dataset.principal;
-      currentAcl = currentAcl.filter((e) => e.principal !== principal);
-      renderShareList();
+    tabContents.forEach((content) => {
+      content.classList.toggle("hidden", content.id !== `${tabName}-tab`);
     });
-  });
-}
-
-function addShareEntry() {
-  const userInput = document.getElementById("share-user-input");
-  const permission = document.getElementById("share-permission").value;
-  const principal = userInput.value.trim();
-
-  if (!principal) {
-    showToast("Please enter a user ID", "error");
-    return;
   }
 
-  if (currentAcl.some((e) => e.principal === principal)) {
-    showToast("User already has access", "error");
-    return;
+  // Load Data
+  async function loadAllData() {
+    await Promise.all([loadDocuments(), loadTokens(), loadAccountInfo()]);
   }
 
-  currentAcl.push({ principal, permission });
-  userInput.value = "";
-  renderShareList();
-}
+  // Documents
+  async function loadDocuments() {
+    const ownedContainer = document.getElementById("owned-documents");
+    const accessibleContainer = document.getElementById("accessible-documents");
 
-function handlePublicToggle() {
-  const isPublic = document.getElementById("public-read-toggle").checked;
-  currentAcl = currentAcl.filter((e) => e.principal !== "public");
+    try {
+      const data = await api("GET", "/documents");
 
-  if (isPublic) {
-    currentAcl.push({ principal: "public", permission: "read" });
+      renderDocuments(ownedContainer, data.owned, true);
+      renderDocuments(accessibleContainer, data.accessible, false);
+    } catch (err) {
+      ownedContainer.innerHTML = `<div class="empty-state">Failed to load documents: ${err.message}</div>`;
+      accessibleContainer.innerHTML = "";
+    }
   }
-}
 
-async function saveShareSettings() {
-  try {
-    await api("PUT", `/documents/${encodeURIComponent(currentDocId)}/acl`, {
-      acl: currentAcl,
-    });
-    closeModal("share-modal");
-    showToast("Sharing settings saved", "success");
-  } catch (err) {
-    showToast(err.message, "error");
-  }
-}
-
-// ============ Settings ============
-
-function openSettings() {
-  openModal("settings-modal");
-  loadAccountInfo();
-  loadTokens();
-}
-
-async function loadAccountInfo() {
-  const detailsContainer = document.getElementById("account-details");
-  const quotaContainer = document.getElementById("quota-info");
-
-  try {
-    const user = await api("GET", "/auth/userinfo");
-    const docs = await api("GET", "/documents");
-
-    detailsContainer.innerHTML = `
-      <div class="info-row"><span class="info-label">User ID</span><span class="info-value">${escapeHtml(user.id)}</span></div>
-      <div class="info-row"><span class="info-label">Email</span><span class="info-value">${escapeHtml(user.email || "N/A")}</span></div>
-      <div class="info-row"><span class="info-label">Name</span><span class="info-value">${escapeHtml(user.name || "N/A")}</span></div>
-    `;
-
-    const docCount = docs.owned.length;
-    const totalSize = docs.owned.reduce((sum, d) => sum + d.size, 0);
-    const docPercent = Math.min(
-      100,
-      (docCount / user.quotas.maxDocuments) * 100,
-    );
-    const storagePercent = Math.min(
-      100,
-      (totalSize / user.quotas.maxTotalStorage) * 100,
-    );
-
-    quotaContainer.innerHTML = `
-      <div class="info-row"><span class="info-label">Documents</span><span class="info-value">${docCount} / ${user.quotas.maxDocuments}</span></div>
-      <div class="quota-bar"><div class="quota-bar-track"><div class="quota-bar-fill" style="width: ${docPercent}%"></div></div></div>
-      <div class="info-row" style="margin-top: 1rem;"><span class="info-label">Storage</span><span class="info-value">${formatBytes(totalSize)} / ${formatBytes(user.quotas.maxTotalStorage)}</span></div>
-      <div class="quota-bar"><div class="quota-bar-track"><div class="quota-bar-fill" style="width: ${storagePercent}%"></div></div></div>
-    `;
-  } catch (_err) {
-    detailsContainer.innerHTML =
-      '<div class="empty-state-small">Failed to load</div>';
-    quotaContainer.innerHTML = "";
-  }
-}
-
-async function loadTokens() {
-  const container = document.getElementById("tokens-list");
-
-  try {
-    const tokens = await api("GET", "/auth/api-tokens");
-
-    if (tokens.length === 0) {
-      container.innerHTML =
-        '<div class="empty-state-small">No API tokens</div>';
+  function renderDocuments(container, documents, isOwner) {
+    if (documents.length === 0) {
+      container.innerHTML = '<div class="empty-state">No documents</div>';
       return;
     }
 
-    container.innerHTML = tokens
+    container.innerHTML = documents
       .map(
-        (token) => `
-        <div class="token-card">
-          <div class="token-card-header">
-            <span class="token-name">${escapeHtml(token.name)}</span>
-            <button class="btn btn-danger btn-small delete-token-btn" data-id="${token.id}">Delete</button>
-          </div>
-          <div class="token-meta">
-            <span>Created: ${formatDate(token.createdAt)}</span>
-            <span>Last used: ${formatDate(token.lastUsedAt)}</span>
-          </div>
-          <div class="token-scopes">${token.scopes.map((s) => `<span class="scope-badge">${s}</span>`).join("")}</div>
+        (doc) => `
+      <div class="document-card" data-id="${doc.id}">
+        <div class="document-card-header">
+          <span class="document-id">${escapeHtml(doc.id)}</span>
+          ${doc.type ? `<span class="document-type">${escapeHtml(doc.type)}</span>` : ""}
         </div>
-      `,
+        <div class="document-meta">
+          <span>Size: ${formatBytes(doc.size)}</span>
+          <span>Created: ${formatDate(doc.createdAt)}</span>
+          ${doc.expiresAt ? `<span>Expires: ${formatDate(doc.expiresAt)}</span>` : ""}
+        </div>
+        <div class="document-actions">
+          <button class="btn btn-secondary btn-small" onclick="viewDocument('${doc.id}')">Content</button>
+          <button class="btn btn-secondary btn-small" onclick="editDocumentType('${doc.id}')">Type</button>
+          <button class="btn btn-secondary btn-small" onclick="exportDocument('${doc.id}', 'json')">JSON</button>
+          <button class="btn btn-secondary btn-small" onclick="exportDocument('${doc.id}', 'binary')">Bin</button>
+          ${
+            isOwner
+              ? `
+            <button class="btn btn-secondary btn-small" onclick="editAcl('${doc.id}')">ACL</button>
+            <button class="btn btn-danger btn-small" onclick="deleteDocument('${doc.id}')">Delete</button>
+          `
+              : ""
+          }
+        </div>
+      </div>
+    `,
       )
       .join("");
+  }
 
-    container.querySelectorAll(".delete-token-btn").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        const id = btn.dataset.id;
+  async function createDocument(e) {
+    e.preventDefault();
+
+    const prefix = document.getElementById("doc-prefix").value;
+    const id = prefix + document.getElementById("doc-id").value.trim();
+    const type = document.getElementById("doc-type").value.trim() || undefined;
+    const expiresAt = document.getElementById("doc-expires").value || undefined;
+
+    try {
+      await api("POST", "/documents", { id, type, expiresAt });
+      closeModal("create-doc-modal");
+      showToast("Document created", "success");
+      loadDocuments();
+
+      // Reset form
+      document.getElementById("create-doc-form").reset();
+    } catch (err) {
+      showToast(err.message, "error");
+    }
+  }
+
+  window.deleteDocument = async (docId) => {
+    showConfirm(
+      "Delete Document",
+      `Are you sure you want to delete "${docId}"? This action cannot be undone.`,
+      async () => {
         try {
-          await api("DELETE", `/auth/api-tokens/${id}`);
+          await api("DELETE", `/documents/${encodeURIComponent(docId)}`);
+          showToast("Document deleted", "success");
+          loadDocuments();
+        } catch (err) {
+          showToast(err.message, "error");
+        }
+      },
+    );
+  };
+
+  // ACL Management
+  window.editAcl = async (docId) => {
+    currentAclDocId = docId;
+    document.getElementById("acl-doc-info").textContent = docId;
+    openModal("edit-acl-modal");
+
+    const entriesContainer = document.getElementById("acl-entries");
+    entriesContainer.innerHTML = '<div class="loading">Loading...</div>';
+
+    try {
+      const data = await api(
+        "GET",
+        `/documents/${encodeURIComponent(docId)}/acl`,
+      );
+      currentAclEntries = data.acl || [];
+      renderAclEntries();
+    } catch (err) {
+      entriesContainer.innerHTML = `<div class="empty-state">Failed to load ACL: ${err.message}</div>`;
+    }
+  };
+
+  function renderAclEntries() {
+    const container = document.getElementById("acl-entries");
+
+    if (currentAclEntries.length === 0) {
+      container.innerHTML =
+        '<div class="empty-state">No ACL entries. Document is private.</div>';
+      return;
+    }
+
+    container.innerHTML = currentAclEntries
+      .map(
+        (entry, idx) => `
+      <div class="acl-entry">
+        <div class="acl-entry-info">
+          <span class="acl-principal">${escapeHtml(entry.principal)}</span>
+          <span class="acl-permission ${entry.permission}">${entry.permission}</span>
+        </div>
+        <button class="btn btn-danger btn-small" onclick="removeAclEntry(${idx})">Remove</button>
+      </div>
+    `,
+      )
+      .join("");
+  }
+
+  window.removeAclEntry = (index) => {
+    currentAclEntries.splice(index, 1);
+    renderAclEntries();
+  };
+
+  function addAclEntry() {
+    const principal = document.getElementById("acl-principal").value.trim();
+    const permission = document.getElementById("acl-permission").value;
+
+    if (!principal) {
+      showToast("Please enter a principal", "error");
+      return;
+    }
+
+    // Check for duplicates
+    if (currentAclEntries.some((e) => e.principal === principal)) {
+      showToast("Principal already exists", "error");
+      return;
+    }
+
+    currentAclEntries.push({ principal, permission });
+    renderAclEntries();
+    document.getElementById("acl-principal").value = "";
+  }
+
+  async function saveAcl() {
+    try {
+      await api(
+        "PUT",
+        `/documents/${encodeURIComponent(currentAclDocId)}/acl`,
+        {
+          acl: currentAclEntries,
+        },
+      );
+      closeModal("edit-acl-modal");
+      showToast("ACL saved", "success");
+    } catch (err) {
+      showToast(err.message, "error");
+    }
+  }
+
+  // API Tokens
+  async function loadTokens() {
+    const container = document.getElementById("tokens-list");
+
+    try {
+      const tokens = await api("GET", "/auth/api-tokens");
+      currentTokens = tokens;
+      renderTokens();
+    } catch (err) {
+      container.innerHTML = `<div class="empty-state">Failed to load tokens: ${err.message}</div>`;
+    }
+  }
+
+  function renderTokens() {
+    const container = document.getElementById("tokens-list");
+
+    if (currentTokens.length === 0) {
+      container.innerHTML =
+        '<div class="empty-state">No API tokens. Create one to use with CLI tools or scripts.</div>';
+      return;
+    }
+
+    container.innerHTML = currentTokens
+      .map(
+        (token) => `
+      <div class="token-card">
+        <div class="token-card-header">
+          <span class="token-name">${escapeHtml(token.name)}</span>
+          <button class="btn btn-danger btn-small" onclick="deleteToken('${token.id}')">Delete</button>
+        </div>
+        <div class="token-meta">
+          <span>Created: ${formatDate(token.createdAt)}</span>
+          <span>Last used: ${formatDate(token.lastUsedAt)}</span>
+          ${token.expiresAt ? `<span>Expires: ${formatDate(token.expiresAt)}</span>` : ""}
+        </div>
+        <div class="token-scopes">
+          ${token.scopes.map((s) => `<span class="scope-badge">${escapeHtml(s)}</span>`).join("")}
+        </div>
+      </div>
+    `,
+      )
+      .join("");
+  }
+
+  async function createToken(e) {
+    e.preventDefault();
+
+    const name = document.getElementById("token-name").value.trim();
+    const scopes = Array.from(
+      document.querySelectorAll('input[name="scope"]:checked'),
+    ).map((cb) => cb.value);
+    const expiresAt =
+      document.getElementById("token-expires").value || undefined;
+
+    if (scopes.length === 0) {
+      showToast("Please select at least one scope", "error");
+      return;
+    }
+
+    try {
+      const data = await api("POST", "/auth/api-tokens", {
+        name,
+        scopes,
+        expiresAt,
+      });
+      closeModal("create-token-modal");
+
+      // Show the token
+      document.getElementById("new-token-value").textContent = data.token;
+      openModal("token-created-modal");
+
+      loadTokens();
+
+      // Reset form
+      document.getElementById("create-token-form").reset();
+    } catch (err) {
+      showToast(err.message, "error");
+    }
+  }
+
+  window.deleteToken = async (tokenId) => {
+    showConfirm(
+      "Delete Token",
+      "Are you sure you want to delete this API token? Any applications using it will stop working.",
+      async () => {
+        try {
+          await api("DELETE", `/auth/api-tokens/${tokenId}`);
           showToast("Token deleted", "success");
           loadTokens();
         } catch (err) {
           showToast(err.message, "error");
         }
-      });
-    });
-  } catch (_err) {
-    container.innerHTML =
-      '<div class="empty-state-small">Failed to load tokens</div>';
-  }
-}
-
-async function createToken(e) {
-  e.preventDefault();
-
-  const name = document.getElementById("token-name").value.trim();
-  const scopes = Array.from(
-    document.querySelectorAll('input[name="scope"]:checked'),
-  ).map((cb) => cb.value);
-
-  if (scopes.length === 0) {
-    showToast("Select at least one permission", "error");
-    return;
-  }
-
-  try {
-    const data = await api("POST", "/auth/api-tokens", { name, scopes });
-    closeModal("create-token-modal");
-
-    document.getElementById("new-token-value").textContent = data.token;
-    openModal("token-created-modal");
-
-    loadTokens();
-    document.getElementById("create-token-form").reset();
-  } catch (err) {
-    showToast(err.message, "error");
-  }
-}
-
-// ============ Confirm Dialog ============
-
-function showConfirm(title, message, callback) {
-  document.getElementById("confirm-title").textContent = title;
-  document.getElementById("confirm-message").textContent = message;
-  pendingConfirmCallback = callback;
-  openModal("confirm-modal");
-}
-
-// ============ Event Listeners ============
-
-document.addEventListener("DOMContentLoaded", () => {
-  // Auth
-  document.getElementById("login-btn").addEventListener("click", handleLogin);
-  document.getElementById("logout-btn").addEventListener("click", handleLogout);
-
-  // New document
-  document
-    .getElementById("new-doc-btn")
-    .addEventListener("click", () => openModal("new-doc-modal"));
-  document
-    .getElementById("welcome-new-doc-btn")
-    .addEventListener("click", () => openModal("new-doc-modal"));
-  document.getElementById("new-doc-form").addEventListener("submit", (e) => {
-    e.preventDefault();
-    const title = document.getElementById("new-doc-title").value.trim();
-    const customId = document.getElementById("new-doc-id").value.trim();
-    createDocument(title, customId ? `doc:${customId}` : null);
-    closeModal("new-doc-modal");
-    document.getElementById("new-doc-form").reset();
-  });
-
-  // Refresh
-  document
-    .getElementById("refresh-docs-btn")
-    .addEventListener("click", loadDocuments);
-
-  // Editor
-  editor.addEventListener("input", handleEditorInput);
-  document
-    .getElementById("doc-title-input")
-    .addEventListener("change", handleTitleChange);
-  document.getElementById("back-btn").addEventListener("click", closeDocument);
-
-  // Share
-  document
-    .getElementById("share-btn")
-    .addEventListener("click", openShareModal);
-  document
-    .getElementById("share-add-btn")
-    .addEventListener("click", addShareEntry);
-  document
-    .getElementById("public-read-toggle")
-    .addEventListener("change", handlePublicToggle);
-  document
-    .getElementById("share-save-btn")
-    .addEventListener("click", saveShareSettings);
-
-  // Delete document
-  document.getElementById("delete-doc-btn").addEventListener("click", () => {
-    if (!currentDocId) return;
-    showConfirm(
-      "Delete Document",
-      "Are you sure you want to delete this document? This cannot be undone.",
-      () => {
-        deleteDocument(currentDocId);
       },
     );
-  });
+  };
 
-  // Settings
-  document
-    .getElementById("settings-btn")
-    .addEventListener("click", openSettings);
-  document.querySelectorAll(".settings-tab").forEach((tab) => {
-    tab.addEventListener("click", () => {
-      document.querySelectorAll(".settings-tab").forEach((t) => {
-        t.classList.remove("active");
+  function copyToken() {
+    const tokenValue = document.getElementById("new-token-value").textContent;
+    navigator.clipboard
+      .writeText(tokenValue)
+      .then(() => {
+        showToast("Token copied to clipboard", "success");
+      })
+      .catch(() => {
+        showToast("Failed to copy token", "error");
       });
-      tab.classList.add("active");
+  }
 
-      const tabName = tab.dataset.tab;
-      document
-        .getElementById("account-settings")
-        .classList.toggle("hidden", tabName !== "account");
-      document
-        .getElementById("tokens-settings")
-        .classList.toggle("hidden", tabName !== "tokens");
-    });
-  });
+  // Account Info
+  async function loadAccountInfo() {
+    const detailsContainer = document.getElementById("account-details");
+    const quotaContainer = document.getElementById("quota-info");
 
-  // Tokens
-  document
-    .getElementById("create-token-btn")
-    .addEventListener("click", () => openModal("create-token-modal"));
-  document
-    .getElementById("create-token-form")
-    .addEventListener("submit", createToken);
-  document.getElementById("copy-token-btn").addEventListener("click", () => {
-    navigator.clipboard.writeText(
-      document.getElementById("new-token-value").textContent,
-    );
-    showToast("Copied to clipboard", "success");
-  });
+    try {
+      const user = await api("GET", "/auth/userinfo");
+      const docs = await api("GET", "/documents");
 
-  // Confirm
-  document.getElementById("confirm-btn").addEventListener("click", () => {
+      detailsContainer.innerHTML = `
+        <div class="info-row">
+          <span class="info-label">User ID</span>
+          <span class="info-value">${escapeHtml(user.id)}</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Email</span>
+          <span class="info-value">${escapeHtml(user.email || "N/A")}</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Name</span>
+          <span class="info-value">${escapeHtml(user.name || "N/A")}</span>
+        </div>
+      `;
+
+      const docCount = docs.owned.length;
+      const totalSize = docs.owned.reduce((sum, d) => sum + d.size, 0);
+
+      const docPercent = Math.min(
+        100,
+        (docCount / user.quotas.maxDocuments) * 100,
+      );
+      const storagePercent = Math.min(
+        100,
+        (totalSize / user.quotas.maxTotalStorage) * 100,
+      );
+
+      quotaContainer.innerHTML = `
+        <div class="info-row">
+          <span class="info-label">Documents</span>
+          <span class="info-value">${docCount} / ${user.quotas.maxDocuments}</span>
+        </div>
+        <div class="quota-bar">
+          <div class="quota-bar-track">
+            <div class="quota-bar-fill ${docPercent > 80 ? (docPercent > 95 ? "danger" : "warning") : ""}" style="width: ${docPercent}%"></div>
+          </div>
+        </div>
+        <div class="info-row" style="margin-top: 1rem;">
+          <span class="info-label">Storage Used</span>
+          <span class="info-value">${formatBytes(totalSize)} / ${formatBytes(user.quotas.maxTotalStorage)}</span>
+        </div>
+        <div class="quota-bar">
+          <div class="quota-bar-track">
+            <div class="quota-bar-fill ${storagePercent > 80 ? (storagePercent > 95 ? "danger" : "warning") : ""}" style="width: ${storagePercent}%"></div>
+          </div>
+        </div>
+        <div class="info-row" style="margin-top: 1rem;">
+          <span class="info-label">Max Document Size</span>
+          <span class="info-value">${formatBytes(user.quotas.maxDocumentSize)}</span>
+        </div>
+      `;
+    } catch (err) {
+      detailsContainer.innerHTML = `<div class="empty-state">Failed to load: ${err.message}</div>`;
+      quotaContainer.innerHTML = "";
+    }
+  }
+
+  // Document Content & Export
+  window.viewDocument = async (docId) => {
+    currentEditingDocId = docId;
+    document.getElementById("edit-doc-id").textContent = docId;
+    const textArea = document.getElementById("doc-content-json");
+    textArea.value = "Loading...";
+    openModal("edit-doc-modal");
+
+    try {
+      const content = await api(
+        "GET",
+        `/documents/${encodeURIComponent(docId)}/export?format=json`,
+      );
+      textArea.value = JSON.stringify(content, null, 2);
+    } catch (err) {
+      textArea.value = `Error loading content: ${err.message}`;
+    }
+  };
+
+  async function saveDocumentContent() {
+    const textArea = document.getElementById("doc-content-json");
+    let content;
+
+    try {
+      content = JSON.parse(textArea.value);
+    } catch (err) {
+      showToast(`Invalid JSON: ${err.message}`, "error");
+      return;
+    }
+
+    try {
+      await api(
+        "PUT",
+        `/documents/${encodeURIComponent(currentEditingDocId)}/content`,
+        content,
+      );
+      closeModal("edit-doc-modal");
+      showToast("Document updated", "success");
+      loadDocuments();
+    } catch (err) {
+      showToast(err.message, "error");
+    }
+  }
+
+  window.exportDocument = (docId, format) => {
+    if (!authToken) {
+      showToast("Not authenticated", "error");
+      return;
+    }
+
+    // Direct window.open doesn't allow setting headers easily for Bearer token.
+    // However, if we use a cookie-based auth or query param token, it works.
+    // Since this is a simple UI, we'll try to use the fetch to get a blob and download it.
+
+    // For simplicity in this demo, we can just use the API if it supports cookie auth or similar.
+    // The server has cookie support (@fastify/cookie registered), but we use Bearer in `api()` helper.
+    // To support download with Bearer token, we need to fetch -> blob -> objectURL -> click.
+
+    const url = `/api/v1/documents/${encodeURIComponent(docId)}/export?format=${format}`;
+
+    fetch(url, {
+      headers: {
+        Authorization: `Bearer ${authToken}`,
+      },
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error("Download failed");
+        return response.blob();
+      })
+      .then((blob) => {
+        const downloadUrl = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = downloadUrl;
+        a.download = `${docId.split(":").pop()}.${format === "json" ? "json" : "amrg"}`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(downloadUrl);
+        a.remove();
+      })
+      .catch((err) => {
+        showToast(err.message, "error");
+      });
+  };
+
+  // Edit Document Type
+  window.editDocumentType = async (docId) => {
+    currentEditingDocId = docId;
+    document.getElementById("edit-type-doc-id").textContent = docId;
+
+    // Clear previous value
+    document.getElementById("edit-doc-type").value = "Loading...";
+    openModal("edit-type-modal");
+
+    try {
+      const doc = await api("GET", `/documents/${encodeURIComponent(docId)}`);
+      document.getElementById("edit-doc-type").value = doc.type || "";
+    } catch (err) {
+      document.getElementById("edit-doc-type").value = "";
+      showToast(`Failed to load document: ${err.message}`, "error");
+    }
+  };
+
+  async function saveDocumentType(e) {
+    e.preventDefault();
+    const type = document.getElementById("edit-doc-type").value.trim();
+
+    try {
+      await api(
+        "PUT",
+        `/documents/${encodeURIComponent(currentEditingDocId)}/type`,
+        { type },
+      );
+      closeModal("edit-type-modal");
+      showToast("Document type updated", "success");
+      loadDocuments();
+    } catch (err) {
+      showToast(err.message, "error");
+    }
+  }
+
+  // Confirm Dialog
+  function showConfirm(title, message, callback) {
+    document.getElementById("confirm-title").textContent = title;
+    document.getElementById("confirm-message").textContent = message;
+    pendingConfirmCallback = callback;
+    openModal("confirm-modal");
+  }
+
+  function handleConfirm() {
     if (pendingConfirmCallback) {
       pendingConfirmCallback();
       pendingConfirmCallback = null;
     }
     closeModal("confirm-modal");
+  }
+
+  // Escape HTML
+  function escapeHtml(text) {
+    const div = document.createElement("div");
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  // Event Listeners
+  loginBtn.addEventListener("click", handleLogin);
+  logoutBtn.addEventListener("click", handleLogout);
+
+  navBtns.forEach((btn) => {
+    btn.addEventListener("click", () => switchTab(btn.dataset.tab));
   });
 
-  // Modal close buttons
+  // Modal buttons
+  document
+    .getElementById("create-doc-btn")
+    .addEventListener("click", () => openModal("create-doc-modal"));
+  document
+    .getElementById("create-token-btn")
+    .addEventListener("click", () => openModal("create-token-modal"));
+  document
+    .getElementById("create-doc-form")
+    .addEventListener("submit", createDocument);
+  document
+    .getElementById("create-token-form")
+    .addEventListener("submit", createToken);
+  document.getElementById("acl-add-btn").addEventListener("click", addAclEntry);
+  document.getElementById("acl-save-btn").addEventListener("click", saveAcl);
+  document
+    .getElementById("save-content-btn")
+    .addEventListener("click", saveDocumentContent);
+  document
+    .getElementById("edit-type-form")
+    .addEventListener("submit", saveDocumentType);
+  document
+    .getElementById("copy-token-btn")
+    .addEventListener("click", copyToken);
+  document
+    .getElementById("confirm-btn")
+    .addEventListener("click", handleConfirm);
+
+  // Close modals
   document.querySelectorAll(".modal-close, .modal-cancel").forEach((btn) => {
     btn.addEventListener("click", closeAllModals);
   });
@@ -764,30 +716,6 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
-  // Keyboard shortcuts
-  document.addEventListener("keydown", (e) => {
-    // Escape to close modals
-    if (e.key === "Escape") {
-      closeAllModals();
-    }
-
-    // Ctrl/Cmd + S to save (prevent default, auto-saved)
-    if ((e.ctrlKey || e.metaKey) && e.key === "s") {
-      e.preventDefault();
-      showToast("Document auto-saved", "info");
-    }
-
-    // Ctrl/Cmd + N for new document
-    if (
-      (e.ctrlKey || e.metaKey) &&
-      e.key === "n" &&
-      !e.target.matches("input, textarea")
-    ) {
-      e.preventDefault();
-      openModal("new-doc-modal");
-    }
-  });
-
   // Initialize
   checkAuth();
-});
+})();
