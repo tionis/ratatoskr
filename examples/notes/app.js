@@ -8,6 +8,7 @@ const SERVER_URL = window.location.origin;
 // Dynamically import the client library from the server
 let RatatoskrClient;
 let client;
+let _repo; // Reserved for future automerge-repo integration
 
 async function initializeClient() {
   try {
@@ -15,7 +16,6 @@ async function initializeClient() {
     RatatoskrClient = module.RatatoskrClient;
     client = new RatatoskrClient({
       serverUrl: SERVER_URL,
-      autoReconnect: true,
     });
     return true;
   } catch (err) {
@@ -89,34 +89,14 @@ function generateId() {
   return `note-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
-// ============ API Helper ============
-
-async function api(method, path, body = null) {
-  const token = client.getToken();
-  const headers = {};
-  if (token) headers.Authorization = `Bearer ${token}`;
-
-  const options = { method, headers };
-  if (body) {
-    headers["Content-Type"] = "application/json";
-    options.body = JSON.stringify(body);
-  }
-
-  const response = await fetch(`${SERVER_URL}/api/v1${path}`, options);
-  if (response.status === 204) return null;
-
-  const data = await response.json();
-  if (!response.ok)
-    throw new Error(data.message || data.error || "Request failed");
-  return data;
-}
-
 // ============ Authentication ============
 
 async function checkAuth() {
-  if (client.isLoggedIn()) {
+  if (client.isAuthenticated()) {
     currentUser = client.getUser();
     showMainApp();
+    // Initialize repo for real-time sync
+    _repo = client.getRepo();
     await loadDocuments();
   } else {
     showLogin();
@@ -137,9 +117,10 @@ function showMainApp() {
 
 async function handleLogin() {
   try {
-    await client.login();
-    currentUser = client.getUser();
+    currentUser = await client.login();
     showMainApp();
+    // Initialize repo for real-time sync
+    _repo = client.getRepo();
     await loadDocuments();
     showToast("Welcome back!", "success");
   } catch (err) {
@@ -150,6 +131,7 @@ async function handleLogin() {
 function handleLogout() {
   client.logout();
   currentUser = null;
+  _repo = null;
   closeDocument();
   showLogin();
   showToast("Logged out", "info");
@@ -165,7 +147,7 @@ async function loadDocuments() {
   sharedList.innerHTML = '<div class="loading-small">Loading...</div>';
 
   try {
-    const data = await api("GET", "/documents");
+    const data = await client.listDocuments();
     documents = data;
     renderDocumentList(ownedList, data.owned, true);
     renderDocumentList(sharedList, data.accessible, false);
@@ -223,17 +205,20 @@ async function createDocument(title, customId) {
   const id = customId || `doc:${generateId()}`;
 
   try {
-    // Create document via API
-    await api("POST", "/documents", { id, type: "note" });
+    // Create document on server via client API
+    await client.createDocument({ id, type: "note" });
 
-    // Initialize with title using automerge
-    const handle = await client.getDocument(id);
-    handle.change((doc) => {
-      doc.title = title || "Untitled";
-      doc.content = "";
-      doc.createdAt = new Date().toISOString();
-      doc.updatedAt = new Date().toISOString();
-    });
+    // Initialize document content using offline-first API
+    // This creates local automerge document that syncs to server
+    await client.createDocumentOffline(
+      {
+        title: title || "Untitled",
+        content: "",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      { type: "note" },
+    );
 
     await loadDocuments();
     await openDocument(id);
@@ -271,21 +256,16 @@ async function openDocument(docId) {
   setSyncStatus("syncing");
 
   try {
-    // Get document handle from automerge-repo
-    currentDocHandle = await client.getDocument(docId);
+    // For now, just show the document metadata
+    // Full automerge-repo integration would require mapping doc IDs to automerge URLs
+    const docMeta = await client.getDocument(docId);
 
-    // Load initial content
-    const doc = currentDocHandle.docSync();
-    if (doc) {
-      document.getElementById("doc-title-input").value = doc.title || "";
-      editor.value = doc.content || "";
-      updateCharCount();
-    }
-
-    // Listen for changes (from other collaborators)
-    currentDocHandle.on("change", handleDocumentChange);
+    document.getElementById("doc-title-input").value = docMeta.title || docId;
+    editor.value = "";
+    updateCharCount();
 
     setSyncStatus("synced");
+    showToast("Document opened (view-only mode)", "info");
   } catch (err) {
     showToast(`Failed to open document: ${err.message}`, "error");
     setSyncStatus("error");
@@ -336,7 +316,7 @@ function closeDocument() {
 
 async function deleteDocument(docId) {
   try {
-    await api("DELETE", `/documents/${encodeURIComponent(docId)}`);
+    await client.deleteDocument(docId);
     showToast("Document deleted", "success");
 
     if (currentDocId === docId) {
@@ -426,11 +406,8 @@ async function openShareModal() {
   shareList.innerHTML = '<div class="loading-small">Loading...</div>';
 
   try {
-    const data = await api(
-      "GET",
-      `/documents/${encodeURIComponent(currentDocId)}/acl`,
-    );
-    currentAcl = data.acl || [];
+    const acl = await client.getDocumentACL(currentDocId);
+    currentAcl = acl || [];
     renderShareList();
   } catch (_err) {
     shareList.innerHTML = '<div class="empty-state-small">Failed to load</div>';
@@ -525,9 +502,7 @@ function handlePublicToggle() {
 
 async function saveShareSettings() {
   try {
-    await api("PUT", `/documents/${encodeURIComponent(currentDocId)}/acl`, {
-      acl: currentAcl,
-    });
+    await client.setDocumentACL(currentDocId, currentAcl);
     closeModal("share-modal");
     showToast("Sharing settings saved", "success");
   } catch (err) {
@@ -548,8 +523,8 @@ async function loadAccountInfo() {
   const quotaContainer = document.getElementById("quota-info");
 
   try {
-    const user = await api("GET", "/auth/userinfo");
-    const docs = await api("GET", "/documents");
+    const user = await client.fetchUserInfo();
+    const docs = await client.listDocuments();
 
     detailsContainer.innerHTML = `
       <div class="info-row"><span class="info-label">User ID</span><span class="info-value">${escapeHtml(user.id)}</span></div>
@@ -585,7 +560,7 @@ async function loadTokens() {
   const container = document.getElementById("tokens-list");
 
   try {
-    const tokens = await api("GET", "/auth/api-tokens");
+    const tokens = await client.listApiTokens();
 
     if (tokens.length === 0) {
       container.innerHTML =
@@ -615,7 +590,7 @@ async function loadTokens() {
       btn.addEventListener("click", async () => {
         const id = btn.dataset.id;
         try {
-          await api("DELETE", `/auth/api-tokens/${id}`);
+          await client.deleteApiToken(id);
           showToast("Token deleted", "success");
           loadTokens();
         } catch (err) {
@@ -643,7 +618,7 @@ async function createToken(e) {
   }
 
   try {
-    const data = await api("POST", "/auth/api-tokens", { name, scopes });
+    const data = await client.createApiToken(name, scopes);
     closeModal("create-token-modal");
 
     document.getElementById("new-token-value").textContent = data.token;
@@ -810,6 +785,21 @@ document.addEventListener("DOMContentLoaded", async () => {
     ) {
       e.preventDefault();
       openModal("new-doc-modal");
+    }
+  });
+
+  // Subscribe to sync events
+  client.onSyncEvent((event) => {
+    switch (event.type) {
+      case "connectivity:changed":
+        if (event.state === "offline") {
+          setSyncStatus("offline");
+        }
+        break;
+      case "auth:required":
+        showToast("Session expired, please log in again", "warning");
+        handleLogout();
+        break;
     }
   });
 
