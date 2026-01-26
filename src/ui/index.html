@@ -281,6 +281,67 @@
       </div>
     </div>
 
+    <!-- Document History Modal -->
+    <div id="history-modal" class="modal hidden">
+      <div class="modal-content modal-large">
+        <div class="modal-header">
+          <h2>Document History</h2>
+          <button class="modal-close">&times;</button>
+        </div>
+        <div id="history-doc-info" class="history-doc-info"></div>
+
+        <!-- Tabs: Timeline | Compare -->
+        <div class="history-tabs">
+          <button class="history-tab active" data-tab="timeline">Timeline</button>
+          <button class="history-tab" data-tab="compare">Compare</button>
+        </div>
+
+        <!-- Timeline view with paginated change list -->
+        <div id="history-timeline-view" class="history-view">
+          <div id="history-list" class="history-list">
+            <div class="loading">Loading...</div>
+          </div>
+          <div id="history-pagination" class="history-pagination hidden">
+            <button id="history-prev" class="btn btn-secondary btn-small" disabled>Previous</button>
+            <span id="history-page-info"></span>
+            <button id="history-next" class="btn btn-secondary btn-small" disabled>Next</button>
+          </div>
+        </div>
+
+        <!-- Compare view with version selectors and diff display -->
+        <div id="history-diff-view" class="history-view hidden">
+          <div class="diff-selector">
+            <div class="diff-selector-group">
+              <label for="diff-from">From</label>
+              <select id="diff-from">
+                <option value="initial">Initial (empty)</option>
+              </select>
+            </div>
+            <div class="diff-selector-group">
+              <label for="diff-to">To</label>
+              <select id="diff-to">
+                <option value="current">Current</option>
+              </select>
+            </div>
+            <button id="compare-btn" class="btn btn-primary">Compare</button>
+          </div>
+          <div id="diff-result" class="diff-result">
+            <div class="empty-state">Select versions to compare</div>
+          </div>
+        </div>
+
+        <!-- Snapshot overlay for viewing past versions -->
+        <div id="history-snapshot-preview" class="history-snapshot hidden">
+          <div class="snapshot-header">
+            <h3>Snapshot Preview</h3>
+            <button id="close-snapshot-btn" class="btn btn-secondary btn-small">Close</button>
+          </div>
+          <div id="snapshot-info" class="snapshot-info"></div>
+          <pre id="snapshot-content" class="snapshot-content"></pre>
+        </div>
+      </div>
+    </div>
+
     <!-- Toast Notifications -->
     <div id="toast-container"></div>
   </div>

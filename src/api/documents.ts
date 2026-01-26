@@ -509,6 +509,254 @@ export async function documentRoutes(fastify: FastifyInstance): Promise<void> {
       return { expiresAt: expiresAt?.toISOString() ?? null };
     },
   );
+
+  // Get document history
+  fastify.get(
+    "/:id/history",
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const { limit = "50", offset = "0" } = request.query as {
+        limit?: string;
+        offset?: string;
+      };
+      const userId = request.auth!.userId;
+
+      const doc = getDocument(id);
+      if (!doc) {
+        reply.code(404).send({
+          error: "not_found",
+          message: "Document not found",
+        });
+        return;
+      }
+
+      // Check read access (same as export)
+      if (doc.ownerId !== userId) {
+        const acl = getDocumentACL(id);
+        const hasAccess = acl.some(
+          (e) =>
+            (e.principal === userId || e.principal === "public") &&
+            (e.permission === "read" || e.permission === "write"),
+        );
+
+        if (!hasAccess) {
+          reply.code(403).send({
+            error: "forbidden",
+            message: "Access denied",
+          });
+          return;
+        }
+      }
+
+      const data = await readDocument(id);
+      if (!data || data.length === 0) {
+        return {
+          changes: [],
+          totalChanges: 0,
+          currentHeads: [],
+        };
+      }
+
+      try {
+        const automergeDoc = Automerge.load(data);
+        const history = Automerge.getHistory(automergeDoc);
+        const currentHeads = Automerge.getHeads(automergeDoc);
+
+        const limitNum = Math.min(Math.max(1, parseInt(limit, 10) || 50), 100);
+        const offsetNum = Math.max(0, parseInt(offset, 10) || 0);
+
+        // Map history to change entries (most recent first)
+        const allChanges = history
+          .map((state, index) => {
+            const change = state.change;
+            return {
+              hash: change.hash,
+              actor: change.actor,
+              seq: change.seq,
+              timestamp: change.time
+                ? new Date(change.time * 1000).toISOString()
+                : null,
+              message: change.message || null,
+              opsCount: change.ops?.length ?? 0,
+              index,
+            };
+          })
+          .reverse();
+
+        const paginatedChanges = allChanges.slice(
+          offsetNum,
+          offsetNum + limitNum,
+        );
+
+        return {
+          changes: paginatedChanges,
+          totalChanges: allChanges.length,
+          currentHeads: currentHeads.map((h) => h),
+        };
+      } catch (err) {
+        reply.code(500).send({
+          error: "internal_error",
+          message: `Failed to load history: ${(err as Error).message}`,
+        });
+        return;
+      }
+    },
+  );
+
+  // Get document snapshot at specific heads
+  fastify.get(
+    "/:id/snapshot",
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const { heads } = request.query as { heads?: string };
+      const userId = request.auth!.userId;
+
+      const doc = getDocument(id);
+      if (!doc) {
+        reply.code(404).send({
+          error: "not_found",
+          message: "Document not found",
+        });
+        return;
+      }
+
+      // Check read access
+      if (doc.ownerId !== userId) {
+        const acl = getDocumentACL(id);
+        const hasAccess = acl.some(
+          (e) =>
+            (e.principal === userId || e.principal === "public") &&
+            (e.permission === "read" || e.permission === "write"),
+        );
+
+        if (!hasAccess) {
+          reply.code(403).send({
+            error: "forbidden",
+            message: "Access denied",
+          });
+          return;
+        }
+      }
+
+      if (!heads) {
+        reply.code(400).send({
+          error: "invalid_request",
+          message: "Missing heads parameter",
+        });
+        return;
+      }
+
+      const data = await readDocument(id);
+      if (!data || data.length === 0) {
+        reply.code(404).send({
+          error: "not_found",
+          message: "Document has no content",
+        });
+        return;
+      }
+
+      try {
+        const automergeDoc = Automerge.load(data);
+        const headsList = heads.split(",").filter((h) => h.trim());
+
+        const snapshot = Automerge.view(automergeDoc, headsList);
+
+        return {
+          heads: headsList,
+          snapshot,
+        };
+      } catch (err) {
+        reply.code(500).send({
+          error: "internal_error",
+          message: `Failed to load snapshot: ${(err as Error).message}`,
+        });
+        return;
+      }
+    },
+  );
+
+  // Get diff between two versions
+  fastify.get(
+    "/:id/diff",
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const { from, to } = request.query as { from?: string; to?: string };
+      const userId = request.auth!.userId;
+
+      const doc = getDocument(id);
+      if (!doc) {
+        reply.code(404).send({
+          error: "not_found",
+          message: "Document not found",
+        });
+        return;
+      }
+
+      // Check read access
+      if (doc.ownerId !== userId) {
+        const acl = getDocumentACL(id);
+        const hasAccess = acl.some(
+          (e) =>
+            (e.principal === userId || e.principal === "public") &&
+            (e.permission === "read" || e.permission === "write"),
+        );
+
+        if (!hasAccess) {
+          reply.code(403).send({
+            error: "forbidden",
+            message: "Access denied",
+          });
+          return;
+        }
+      }
+
+      if (!from) {
+        reply.code(400).send({
+          error: "invalid_request",
+          message: "Missing from parameter",
+        });
+        return;
+      }
+
+      const data = await readDocument(id);
+      if (!data || data.length === 0) {
+        reply.code(404).send({
+          error: "not_found",
+          message: "Document has no content",
+        });
+        return;
+      }
+
+      try {
+        const automergeDoc = Automerge.load(data);
+        const currentHeads = Automerge.getHeads(automergeDoc);
+
+        // Handle "initial" as empty heads (document start)
+        const fromHeads =
+          from === "initial" ? [] : from.split(",").filter((h) => h.trim());
+        const toHeads = to
+          ? to.split(",").filter((h) => h.trim())
+          : currentHeads;
+
+        const patches = Automerge.diff(automergeDoc, fromHeads, toHeads);
+
+        return {
+          from: fromHeads,
+          to: toHeads,
+          patches,
+        };
+      } catch (err) {
+        reply.code(500).send({
+          error: "internal_error",
+          message: `Failed to compute diff: ${(err as Error).message}`,
+        });
+        return;
+      }
+    },
+  );
 }
 
 function docToResponse(doc: {

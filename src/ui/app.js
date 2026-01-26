@@ -8,6 +8,11 @@
   let currentAclEntries = [];
   let pendingConfirmCallback = null;
   let currentEditingDocId = null;
+  let currentHistoryDocId = null;
+  let historyChanges = [];
+  let historyTotalChanges = 0;
+  let historyPage = 0;
+  const HISTORY_PAGE_SIZE = 20;
 
   // DOM Elements
   const loginScreen = document.getElementById("login-screen");
@@ -211,6 +216,7 @@
         </div>
         <div class="document-actions">
           <button class="btn btn-secondary btn-small" onclick="viewDocument('${doc.id}')">Content</button>
+          <button class="btn btn-secondary btn-small" onclick="viewHistory('${doc.id}')">History</button>
           <button class="btn btn-secondary btn-small" onclick="editDocumentType('${doc.id}')">Type</button>
           <button class="btn btn-secondary btn-small" onclick="exportDocument('${doc.id}', 'json')">JSON</button>
           <button class="btn btn-secondary btn-small" onclick="exportDocument('${doc.id}', 'binary')">Bin</button>
@@ -646,6 +652,235 @@
     }
   }
 
+  // Document History
+  window.viewHistory = async (docId) => {
+    currentHistoryDocId = docId;
+    historyPage = 0;
+    historyChanges = [];
+    historyTotalChanges = 0;
+
+    document.getElementById("history-doc-info").textContent = docId;
+    document.getElementById("history-list").innerHTML =
+      '<div class="loading">Loading...</div>';
+    document.getElementById("history-pagination").classList.add("hidden");
+    document.getElementById("history-snapshot-preview").classList.add("hidden");
+    document.getElementById("diff-result").innerHTML =
+      '<div class="empty-state">Select versions to compare</div>';
+
+    // Reset tabs
+    document.querySelectorAll(".history-tab").forEach((tab) => {
+      tab.classList.toggle("active", tab.dataset.tab === "timeline");
+    });
+    document.getElementById("history-timeline-view").classList.remove("hidden");
+    document.getElementById("history-diff-view").classList.add("hidden");
+
+    openModal("history-modal");
+    await loadHistoryPage();
+  };
+
+  async function loadHistoryPage() {
+    const offset = historyPage * HISTORY_PAGE_SIZE;
+
+    try {
+      const data = await api(
+        "GET",
+        `/documents/${encodeURIComponent(currentHistoryDocId)}/history?limit=${HISTORY_PAGE_SIZE}&offset=${offset}`,
+      );
+
+      historyChanges = data.changes;
+      historyTotalChanges = data.totalChanges;
+
+      renderHistoryList();
+      updateHistoryPagination();
+      populateDiffSelectors(data.changes, data.currentHeads);
+    } catch (err) {
+      document.getElementById("history-list").innerHTML =
+        `<div class="empty-state">Failed to load history: ${escapeHtml(err.message)}</div>`;
+    }
+  }
+
+  function renderHistoryList() {
+    const container = document.getElementById("history-list");
+
+    if (historyChanges.length === 0) {
+      container.innerHTML =
+        '<div class="empty-state">No changes recorded yet</div>';
+      return;
+    }
+
+    container.innerHTML = historyChanges
+      .map(
+        (change) => `
+      <div class="history-entry">
+        <div class="history-entry-info">
+          <div class="history-entry-main">
+            <span class="history-seq">#${change.seq}</span>
+            <span class="history-timestamp">${change.timestamp ? formatDate(change.timestamp) : "Unknown time"}</span>
+          </div>
+          <div class="history-entry-meta">
+            <span class="history-actor" title="${escapeHtml(change.actor)}">Actor: ${escapeHtml(change.actor.substring(0, 12))}...</span>
+            <span class="history-ops">${change.opsCount} ops</span>
+            ${change.message ? `<span class="history-message">${escapeHtml(change.message)}</span>` : ""}
+          </div>
+        </div>
+        <div class="history-entry-actions">
+          <button class="btn btn-secondary btn-small" onclick="viewSnapshot('${change.hash}')">View</button>
+        </div>
+      </div>
+    `,
+      )
+      .join("");
+  }
+
+  function updateHistoryPagination() {
+    const paginationEl = document.getElementById("history-pagination");
+    const prevBtn = document.getElementById("history-prev");
+    const nextBtn = document.getElementById("history-next");
+    const pageInfo = document.getElementById("history-page-info");
+
+    if (historyTotalChanges <= HISTORY_PAGE_SIZE) {
+      paginationEl.classList.add("hidden");
+      return;
+    }
+
+    paginationEl.classList.remove("hidden");
+
+    const totalPages = Math.ceil(historyTotalChanges / HISTORY_PAGE_SIZE);
+    pageInfo.textContent = `Page ${historyPage + 1} of ${totalPages}`;
+
+    prevBtn.disabled = historyPage === 0;
+    nextBtn.disabled = historyPage >= totalPages - 1;
+  }
+
+  function populateDiffSelectors(changes, currentHeads) {
+    const fromSelect = document.getElementById("diff-from");
+    const toSelect = document.getElementById("diff-to");
+
+    // Keep initial option for 'from'
+    fromSelect.innerHTML = '<option value="initial">Initial (empty)</option>';
+
+    // Keep current option for 'to'
+    toSelect.innerHTML = `<option value="${currentHeads.join(",")}">Current</option>`;
+
+    // Add change options
+    changes.forEach((change) => {
+      const label = `#${change.seq} - ${change.timestamp ? new Date(change.timestamp).toLocaleString() : "Unknown"}`;
+      fromSelect.innerHTML += `<option value="${change.hash}">${escapeHtml(label)}</option>`;
+      toSelect.innerHTML += `<option value="${change.hash}">${escapeHtml(label)}</option>`;
+    });
+  }
+
+  window.viewSnapshot = async (hash) => {
+    const previewEl = document.getElementById("history-snapshot-preview");
+    const infoEl = document.getElementById("snapshot-info");
+    const contentEl = document.getElementById("snapshot-content");
+
+    previewEl.classList.remove("hidden");
+    infoEl.textContent = `Loading snapshot at ${hash}...`;
+    contentEl.textContent = "";
+
+    try {
+      const data = await api(
+        "GET",
+        `/documents/${encodeURIComponent(currentHistoryDocId)}/snapshot?heads=${hash}`,
+      );
+
+      infoEl.textContent = `Snapshot at: ${hash}`;
+      contentEl.textContent = JSON.stringify(data.snapshot, null, 2);
+    } catch (err) {
+      infoEl.textContent = "Error loading snapshot";
+      contentEl.textContent = err.message;
+    }
+  };
+
+  function closeSnapshotPreview() {
+    document.getElementById("history-snapshot-preview").classList.add("hidden");
+  }
+
+  async function compareDiff() {
+    const fromSelect = document.getElementById("diff-from");
+    const toSelect = document.getElementById("diff-to");
+    const resultEl = document.getElementById("diff-result");
+
+    const fromValue = fromSelect.value;
+    const toValue = toSelect.value;
+
+    resultEl.innerHTML = '<div class="loading">Computing diff...</div>';
+
+    try {
+      const params = new URLSearchParams({ from: fromValue });
+      if (toValue && toValue !== "current") {
+        params.set("to", toValue);
+      }
+
+      const data = await api(
+        "GET",
+        `/documents/${encodeURIComponent(currentHistoryDocId)}/diff?${params}`,
+      );
+
+      renderDiffResult(data.patches);
+    } catch (err) {
+      resultEl.innerHTML = `<div class="empty-state">Failed to compute diff: ${escapeHtml(err.message)}</div>`;
+    }
+  }
+
+  function renderDiffResult(patches) {
+    const resultEl = document.getElementById("diff-result");
+
+    if (!patches || patches.length === 0) {
+      resultEl.innerHTML =
+        '<div class="empty-state">No differences found</div>';
+      return;
+    }
+
+    resultEl.innerHTML = `
+      <div class="patch-list">
+        ${patches
+          .map((patch) => {
+            const action = patch.action || "unknown";
+            const path = patch.path ? patch.path.join(" / ") : "";
+            let valueDisplay = "";
+
+            if (patch.value !== undefined) {
+              valueDisplay =
+                typeof patch.value === "object"
+                  ? JSON.stringify(patch.value)
+                  : String(patch.value);
+            } else if (patch.values !== undefined) {
+              valueDisplay = JSON.stringify(patch.values);
+            }
+
+            return `
+            <div class="patch-entry ${action}">
+              <div class="patch-path">
+                <span class="patch-action ${action}">${escapeHtml(action)}</span>
+                ${path ? escapeHtml(path) : "(root)"}
+              </div>
+              ${valueDisplay ? `<div class="patch-value">${escapeHtml(valueDisplay)}</div>` : ""}
+            </div>
+          `;
+          })
+          .join("")}
+      </div>
+    `;
+  }
+
+  function switchHistoryTab(tabName) {
+    document.querySelectorAll(".history-tab").forEach((tab) => {
+      tab.classList.toggle("active", tab.dataset.tab === tabName);
+    });
+
+    document
+      .getElementById("history-timeline-view")
+      .classList.toggle("hidden", tabName !== "timeline");
+    document
+      .getElementById("history-diff-view")
+      .classList.toggle("hidden", tabName !== "compare");
+
+    // Close snapshot preview when switching tabs
+    closeSnapshotPreview();
+  }
+
   // Confirm Dialog
   function showConfirm(title, message, callback) {
     document.getElementById("confirm-title").textContent = title;
@@ -704,6 +939,32 @@
   document
     .getElementById("confirm-btn")
     .addEventListener("click", handleConfirm);
+
+  // History modal event listeners
+  document.querySelectorAll(".history-tab").forEach((tab) => {
+    tab.addEventListener("click", () => switchHistoryTab(tab.dataset.tab));
+  });
+
+  document.getElementById("history-prev").addEventListener("click", () => {
+    if (historyPage > 0) {
+      historyPage--;
+      loadHistoryPage();
+    }
+  });
+
+  document.getElementById("history-next").addEventListener("click", () => {
+    const totalPages = Math.ceil(historyTotalChanges / HISTORY_PAGE_SIZE);
+    if (historyPage < totalPages - 1) {
+      historyPage++;
+      loadHistoryPage();
+    }
+  });
+
+  document
+    .getElementById("close-snapshot-btn")
+    .addEventListener("click", closeSnapshotPreview);
+
+  document.getElementById("compare-btn").addEventListener("click", compareDiff);
 
   // Close modals
   document.querySelectorAll(".modal-close, .modal-cancel").forEach((btn) => {
