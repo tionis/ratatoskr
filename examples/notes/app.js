@@ -230,6 +230,32 @@ async function checkAuth() {
     currentUser = client.getUser();
     showMainApp();
     repo = client.getRepo();
+
+    // Debug: Check what repo actually is
+    console.log("repo type:", typeof repo);
+    console.log("repo constructor:", repo?.constructor?.name);
+    console.log(
+      "repo methods:",
+      Object.getOwnPropertyNames(Object.getPrototypeOf(repo || {})),
+    );
+    console.log("repo.create type:", typeof repo?.create);
+    console.log("repo.find type:", typeof repo?.find);
+
+    // Test creating a document
+    if (repo && typeof repo.create === "function") {
+      const testHandle = repo.create();
+      console.log("testHandle type:", typeof testHandle);
+      console.log("testHandle constructor:", testHandle?.constructor?.name);
+      console.log(
+        "testHandle prototype methods:",
+        Object.getOwnPropertyNames(Object.getPrototypeOf(testHandle || {})),
+      );
+      console.log("testHandle own keys:", Object.keys(testHandle || {}));
+      console.log("testHandle.doc type:", typeof testHandle?.doc);
+      console.log("testHandle.change type:", typeof testHandle?.change);
+      console.log("testHandle.url:", testHandle?.url);
+    }
+
     await initializeAppDocument();
     renderDocumentList();
   } else {
