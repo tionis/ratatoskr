@@ -4,9 +4,9 @@
 // - app:dev.tionis.notes - Index document tracking all notes
 // - doc:dev.tionis.notes-{id} - Individual note documents
 
-const SERVER_URL = window.location.origin;
+const SERVER_URL = "https://ratatoskr.tionis.dev";
 const APP_NAMESPACE = "dev.tionis.notes";
-const APP_DOC_ID = `app:${APP_NAMESPACE}`;
+const APP_DOC_URL_KEY = `ratatoskr:${APP_NAMESPACE}:app-url`;
 
 // Client and repo
 let RatatoskrClient;
@@ -15,8 +15,10 @@ let repo;
 
 // App state
 let appDocHandle = null;
+let appDocUrl = null;
 let currentUser = null;
-let currentDocId = null;
+let currentDocId = null; // automerge URL
+let currentServerId = null; // server document ID for ACL operations
 let currentDocHandle = null;
 let currentAcl = [];
 let isOwner = false;
@@ -48,50 +50,53 @@ async function initializeClient() {
 }
 
 async function initializeAppDocument() {
-  // Get or create the app index document
-  try {
+  // Check if we have a stored app document URL
+  appDocUrl = localStorage.getItem(APP_DOC_URL_KEY);
+
+  if (appDocUrl) {
     // Try to find existing app document
-    appDocHandle = repo.find(APP_DOC_ID);
-    await appDocHandle.whenReady();
-
-    const doc = appDocHandle.docSync();
-    if (!doc || Object.keys(doc).length === 0) {
-      // Initialize the app document structure
-      appDocHandle.change((d) => {
-        d.notes = []; // Array of { id, title, createdAt, updatedAt }
-        d.settings = {};
-        d.version = 1;
-      });
-    }
-  } catch (_err) {
-    // Create the app document on the server first
     try {
-      await client.createDocument({ id: APP_DOC_ID, type: "app-index" });
-    } catch (createErr) {
-      // May already exist, that's fine
-      if (!createErr.message?.includes("already exists")) {
-        console.warn("Could not create app document:", createErr);
+      appDocHandle = repo.find(appDocUrl);
+      await appDocHandle.whenReady(["ready", "unavailable"]);
+
+      const doc = appDocHandle.docSync();
+      if (doc && Object.keys(doc).length > 0) {
+        // Found existing document
+        appDocHandle.on("change", () => renderDocumentList());
+        return;
       }
-    }
-
-    // Now find/create locally
-    appDocHandle = repo.find(APP_DOC_ID);
-    await appDocHandle.whenReady();
-
-    const doc = appDocHandle.docSync();
-    if (!doc || Object.keys(doc).length === 0) {
-      appDocHandle.change((d) => {
-        d.notes = [];
-        d.settings = {};
-        d.version = 1;
-      });
+    } catch (err) {
+      console.warn("Could not load app document, creating new one:", err);
     }
   }
 
-  // Listen for changes to the app document (e.g., from other devices)
-  appDocHandle.on("change", () => {
-    renderDocumentList();
+  // Create new app document
+  appDocHandle = repo.create();
+  appDocUrl = appDocHandle.url;
+
+  // Initialize structure
+  appDocHandle.change((d) => {
+    d.notes = []; // Array of { id, title, createdAt, updatedAt }
+    d.settings = {};
+    d.version = 1;
   });
+
+  // Store the URL for later
+  localStorage.setItem(APP_DOC_URL_KEY, appDocUrl);
+
+  // Register with server so it persists
+  try {
+    await client.createDocument({
+      id: `app:${APP_NAMESPACE}-${appDocUrl.replace("automerge:", "")}`,
+      type: "app-index",
+    });
+  } catch (err) {
+    // May fail if offline, that's ok - will sync later
+    console.warn("Could not register app document with server:", err);
+  }
+
+  // Listen for changes
+  appDocHandle.on("change", () => renderDocumentList());
 }
 
 // ============ Utility Functions ============
@@ -139,10 +144,6 @@ function formatBytes(bytes) {
 
 function generateNoteId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
-}
-
-function makeDocId(noteId) {
-  return `doc:${APP_NAMESPACE}-${noteId}`;
 }
 
 // ============ Authentication ============
@@ -214,7 +215,7 @@ function renderDocumentList() {
   } else {
     ownedList.innerHTML = notes
       .map((note) => {
-        const isActive = makeDocId(note.id) === currentDocId;
+        const isActive = note.url === currentDocId;
         return `
           <div class="doc-item ${isActive ? "active" : ""}" data-id="${escapeHtml(note.id)}">
             <div class="doc-item-icon">
@@ -248,15 +249,12 @@ function renderDocumentList() {
 
 async function createDocument(title) {
   const noteId = generateNoteId();
-  const docId = makeDocId(noteId);
 
   try {
-    // Create document on server
-    await client.createDocument({ id: docId, type: "note" });
-
     // Create local automerge document
-    const handle = repo.find(docId);
-    await handle.whenReady();
+    const handle = repo.create();
+    const docUrl = handle.url;
+    const serverId = `doc:${APP_NAMESPACE}-${docUrl.replace("automerge:", "")}`;
 
     // Initialize document content
     handle.change((doc) => {
@@ -266,11 +264,20 @@ async function createDocument(title) {
       doc.updatedAt = new Date().toISOString();
     });
 
-    // Add to app index
+    // Register with server
+    try {
+      await client.createDocument({ id: serverId, type: "note" });
+    } catch (err) {
+      console.warn("Could not register document with server:", err);
+    }
+
+    // Add to app index (store the automerge URL)
     appDocHandle.change((appDoc) => {
       if (!appDoc.notes) appDoc.notes = [];
       appDoc.notes.unshift({
         id: noteId,
+        url: docUrl,
+        serverId: serverId,
         title: title || "Untitled",
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -278,22 +285,38 @@ async function createDocument(title) {
     });
 
     renderDocumentList();
-    await openDocument(noteId);
+    await openDocumentByUrl(docUrl);
     showToast("Document created", "success");
   } catch (err) {
     showToast(err.message, "error");
   }
 }
 
-async function openDocument(noteId) {
-  const docId = makeDocId(noteId);
+function openDocument(noteId) {
+  // Find the note in the app index to get its URL
+  const notes = getNotesFromAppDoc();
+  const note = notes.find((n) => n.id === noteId);
+  if (!note || !note.url) {
+    showToast("Document not found", "error");
+    return;
+  }
+  openDocumentByUrl(note.url, note);
+}
 
+async function openDocumentByUrl(docUrl, noteInfo = null) {
   // Close previous document if open
   if (currentDocHandle) {
     currentDocHandle.off("change", handleDocumentChange);
   }
 
-  currentDocId = docId;
+  // Find note info if not provided
+  if (!noteInfo) {
+    const notes = getNotesFromAppDoc();
+    noteInfo = notes.find((n) => n.url === docUrl);
+  }
+
+  currentDocId = docUrl;
+  currentServerId = noteInfo?.serverId || null;
   isOwner = true; // For now, assume ownership of our namespaced docs
 
   // Update UI
@@ -302,7 +325,9 @@ async function openDocument(noteId) {
 
   // Update sidebar active state
   document.querySelectorAll(".doc-item").forEach((item) => {
-    item.classList.toggle("active", makeDocId(item.dataset.id) === docId);
+    const notes = getNotesFromAppDoc();
+    const note = notes.find((n) => n.id === item.dataset.id);
+    item.classList.toggle("active", note?.url === docUrl);
   });
 
   // Show owner buttons
@@ -313,8 +338,8 @@ async function openDocument(noteId) {
 
   try {
     // Get document handle
-    currentDocHandle = repo.find(docId);
-    await currentDocHandle.whenReady();
+    currentDocHandle = repo.find(docUrl);
+    await currentDocHandle.whenReady(["ready", "unavailable"]);
 
     // Load content
     const doc = currentDocHandle.docSync();
@@ -363,6 +388,7 @@ function closeDocument() {
     currentDocHandle = null;
   }
   currentDocId = null;
+  currentServerId = null;
 
   welcomeView.classList.remove("hidden");
   editorView.classList.add("hidden");
@@ -373,10 +399,23 @@ function closeDocument() {
 }
 
 async function deleteDocument(noteId) {
-  const docId = makeDocId(noteId);
+  const notes = getNotesFromAppDoc();
+  const note = notes.find((n) => n.id === noteId);
+
+  if (!note) {
+    showToast("Document not found", "error");
+    return;
+  }
 
   try {
-    await client.deleteDocument(docId);
+    // Try to delete from server if we have a server ID
+    if (note.serverId) {
+      try {
+        await client.deleteDocument(note.serverId);
+      } catch (err) {
+        console.warn("Could not delete from server:", err);
+      }
+    }
 
     // Remove from app index
     appDocHandle.change((appDoc) => {
@@ -390,7 +429,7 @@ async function deleteDocument(noteId) {
 
     showToast("Document deleted", "success");
 
-    if (currentDocId === docId) {
+    if (currentDocId === note.url) {
       closeDocument();
     }
     renderDocumentList();
@@ -442,11 +481,9 @@ function handleTitleChange() {
 function updateNoteInIndex(updates) {
   if (!appDocHandle || !currentDocId) return;
 
-  const noteId = currentDocId.replace(`doc:${APP_NAMESPACE}-`, "");
-
   appDocHandle.change((appDoc) => {
     if (!appDoc.notes) return;
-    const note = appDoc.notes.find((n) => n.id === noteId);
+    const note = appDoc.notes.find((n) => n.url === currentDocId);
     if (note) {
       Object.assign(note, updates);
     }
@@ -484,10 +521,13 @@ function setSyncStatus(status) {
 // ============ Sharing / ACL ============
 
 async function openShareModal() {
-  if (!currentDocId || !isOwner) return;
+  if (!currentDocId || !isOwner || !currentServerId) {
+    showToast("Cannot share: document not registered with server", "error");
+    return;
+  }
 
   document.getElementById("share-doc-title").textContent =
-    document.getElementById("doc-title-input").value || currentDocId;
+    document.getElementById("doc-title-input").value || "Untitled";
 
   openModal("share-modal");
 
@@ -495,7 +535,7 @@ async function openShareModal() {
   shareList.innerHTML = '<div class="loading-small">Loading...</div>';
 
   try {
-    const acl = await client.getDocumentACL(currentDocId);
+    const acl = await client.getDocumentACL(currentServerId);
     currentAcl = acl || [];
     renderShareList();
   } catch (_err) {
@@ -588,7 +628,7 @@ function handlePublicToggle() {
 
 async function saveShareSettings() {
   try {
-    await client.setDocumentACL(currentDocId, currentAcl);
+    await client.setDocumentACL(currentServerId, currentAcl);
     closeModal("share-modal");
     showToast("Sharing settings saved", "success");
   } catch (err) {
@@ -784,11 +824,14 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Delete document
   document.getElementById("delete-doc-btn").addEventListener("click", () => {
     if (!currentDocId) return;
-    const noteId = currentDocId.replace(`doc:${APP_NAMESPACE}-`, "");
+    // Find the note by URL
+    const notes = getNotesFromAppDoc();
+    const note = notes.find((n) => n.url === currentDocId);
+    if (!note) return;
     showConfirm(
       "Delete Document",
       "Are you sure you want to delete this document? This cannot be undone.",
-      () => deleteDocument(noteId),
+      () => deleteDocument(note.id),
     );
   });
 
