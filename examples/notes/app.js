@@ -63,7 +63,7 @@ async function initializeAppDocument() {
       appDocHandle = repo.find(appDocUrl);
       await waitForHandle(appDocHandle);
 
-      const doc = appDocHandle.doc();
+      const doc = getDocFromHandle(appDocHandle);
       if (doc && Object.keys(doc).length > 0) {
         // Found existing document
         appDocHandle.on("change", () => renderDocumentList());
@@ -108,10 +108,34 @@ async function initializeAppDocument() {
 // ============ Helper Functions ============
 
 /**
+ * Get document from handle, trying different API methods.
+ */
+function getDocFromHandle(handle) {
+  if (typeof handle.doc === "function") {
+    return handle.doc();
+  }
+  if (typeof handle.docSync === "function") {
+    return handle.docSync();
+  }
+  // Maybe it's a property, not a method
+  if (handle.doc !== undefined && typeof handle.doc !== "function") {
+    return handle.doc;
+  }
+  return undefined;
+}
+
+/**
  * Wait for a document handle to be ready.
  * Works with different automerge-repo versions.
  */
 async function waitForHandle(handle, timeoutMs = 5000) {
+  console.log("waitForHandle: handle type =", typeof handle);
+  console.log("waitForHandle: handle methods =", Object.keys(handle || {}));
+
+  if (!handle) {
+    throw new Error("Invalid handle: null or undefined");
+  }
+
   // If handle has whenReady method, use it
   if (typeof handle.whenReady === "function") {
     try {
@@ -122,14 +146,18 @@ async function waitForHandle(handle, timeoutMs = 5000) {
     }
   }
 
-  // Fallback: poll until doc() returns something or timeout
+  // Fallback: poll until doc returns something or timeout
   const startTime = Date.now();
   return new Promise((resolve, reject) => {
     const check = () => {
-      const doc = handle.doc();
-      if (doc !== undefined) {
-        resolve();
-        return;
+      try {
+        const doc = getDocFromHandle(handle);
+        if (doc !== undefined) {
+          resolve();
+          return;
+        }
+      } catch (err) {
+        console.warn("getDocFromHandle error:", err);
       }
       if (Date.now() - startTime > timeoutMs) {
         reject(new Error("Timeout waiting for document"));
@@ -248,7 +276,7 @@ function handleLogout() {
 
 function getNotesFromAppDoc() {
   if (!appDocHandle) return [];
-  const doc = appDocHandle.doc();
+  const doc = getDocFromHandle(appDocHandle);
   return doc?.notes || [];
 }
 
@@ -391,7 +419,7 @@ async function openDocumentByUrl(docUrl, noteInfo = null) {
     await waitForHandle(currentDocHandle);
 
     // Load content
-    const doc = currentDocHandle.doc();
+    const doc = getDocFromHandle(currentDocHandle);
     if (!doc) {
       showToast("Document unavailable - may need to sync", "error");
       setSyncStatus("error");
