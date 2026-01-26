@@ -41,6 +41,10 @@ async function initializeClient() {
     client = new RatatoskrClient({
       serverUrl: SERVER_URL,
     });
+    console.log(
+      "Client initialized, token in localStorage:",
+      localStorage.getItem("ratatoskr:token") ? "present" : "absent",
+    );
     return true;
   } catch (err) {
     console.error("Failed to load Ratatoskr client:", err);
@@ -187,6 +191,13 @@ function generateNoteId() {
 // ============ Authentication ============
 
 async function checkAuth() {
+  console.log("checkAuth: isAuthenticated =", client.isAuthenticated());
+  console.log(
+    "checkAuth: hasStoredCredentials =",
+    client.hasStoredCredentials(),
+  );
+  console.log("checkAuth: user =", client.getUser());
+
   if (client.isAuthenticated()) {
     currentUser = client.getUser();
     showMainApp();
