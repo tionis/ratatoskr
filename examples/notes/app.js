@@ -59,7 +59,7 @@ async function initializeAppDocument() {
       appDocHandle = repo.find(appDocUrl);
       await appDocHandle.whenReady(["ready", "unavailable"]);
 
-      const doc = appDocHandle.docSync();
+      const doc = appDocHandle.doc();
       if (doc && Object.keys(doc).length > 0) {
         // Found existing document
         appDocHandle.on("change", () => renderDocumentList());
@@ -74,17 +74,10 @@ async function initializeAppDocument() {
   appDocHandle = repo.create();
   appDocUrl = appDocHandle.url;
 
-  // Initialize structure
-  appDocHandle.change((d) => {
-    d.notes = []; // Array of { id, title, createdAt, updatedAt }
-    d.settings = {};
-    d.version = 1;
-  });
-
   // Store the URL for later
   localStorage.setItem(APP_DOC_URL_KEY, appDocUrl);
 
-  // Register with server so it persists
+  // Register with server FIRST (before .change() triggers sync)
   try {
     await client.createDocument({
       id: `app:${APP_NAMESPACE}-${appDocUrl.replace("automerge:", "")}`,
@@ -94,6 +87,13 @@ async function initializeAppDocument() {
     // May fail if offline, that's ok - will sync later
     console.warn("Could not register app document with server:", err);
   }
+
+  // THEN initialize structure (this triggers sync)
+  appDocHandle.change((d) => {
+    d.notes = []; // Array of { id, title, createdAt, updatedAt }
+    d.settings = {};
+    d.version = 1;
+  });
 
   // Listen for changes
   appDocHandle.on("change", () => renderDocumentList());
@@ -199,7 +199,7 @@ function handleLogout() {
 
 function getNotesFromAppDoc() {
   if (!appDocHandle) return [];
-  const doc = appDocHandle.docSync();
+  const doc = appDocHandle.doc();
   return doc?.notes || [];
 }
 
@@ -256,20 +256,20 @@ async function createDocument(title) {
     const docUrl = handle.url;
     const serverId = `doc:${APP_NAMESPACE}-${docUrl.replace("automerge:", "")}`;
 
-    // Initialize document content
+    // Register with server FIRST (before .change() triggers sync)
+    try {
+      await client.createDocument({ id: serverId, type: "note" });
+    } catch (err) {
+      console.warn("Could not register document with server:", err);
+    }
+
+    // THEN initialize document content (this triggers sync)
     handle.change((doc) => {
       doc.title = title || "Untitled";
       doc.content = "";
       doc.createdAt = new Date().toISOString();
       doc.updatedAt = new Date().toISOString();
     });
-
-    // Register with server
-    try {
-      await client.createDocument({ id: serverId, type: "note" });
-    } catch (err) {
-      console.warn("Could not register document with server:", err);
-    }
 
     // Add to app index (store the automerge URL)
     appDocHandle.change((appDoc) => {
@@ -341,8 +341,16 @@ async function openDocumentByUrl(docUrl, noteInfo = null) {
     currentDocHandle = repo.find(docUrl);
     await currentDocHandle.whenReady(["ready", "unavailable"]);
 
+    // Check if document is actually available
+    if (!currentDocHandle.isReady || !currentDocHandle.isReady()) {
+      showToast("Document unavailable - may need to sync", "error");
+      setSyncStatus("error");
+      currentDocHandle = null;
+      return;
+    }
+
     // Load content
-    const doc = currentDocHandle.docSync();
+    const doc = currentDocHandle.doc();
     if (doc) {
       document.getElementById("doc-title-input").value = doc.title || "";
       editor.value = doc.content || "";
@@ -356,6 +364,7 @@ async function openDocumentByUrl(docUrl, noteInfo = null) {
   } catch (err) {
     showToast(`Failed to open document: ${err.message}`, "error");
     setSyncStatus("error");
+    currentDocHandle = null;
   }
 }
 
@@ -443,12 +452,15 @@ async function deleteDocument(noteId) {
 let saveTimeout = null;
 
 function handleEditorInput() {
-  if (!currentDocHandle) return;
+  if (!currentDocHandle || typeof currentDocHandle.change !== "function")
+    return;
 
   setSyncStatus("syncing");
 
   clearTimeout(saveTimeout);
   saveTimeout = setTimeout(() => {
+    if (!currentDocHandle || typeof currentDocHandle.change !== "function")
+      return;
     const content = editor.value;
     currentDocHandle.change((doc) => {
       doc.content = content;
@@ -465,7 +477,8 @@ function handleEditorInput() {
 }
 
 function handleTitleChange() {
-  if (!currentDocHandle) return;
+  if (!currentDocHandle || typeof currentDocHandle.change !== "function")
+    return;
 
   const title = document.getElementById("doc-title-input").value;
   currentDocHandle.change((doc) => {
