@@ -4,7 +4,11 @@
 
 import { type ACLResolver, checkPermission } from "../lib/acl.ts";
 import { parseDocumentId } from "../lib/types.ts";
-import { getDocument, getDocumentACL } from "../storage/database.ts";
+import {
+  getDocument,
+  getDocumentACL,
+  getDocumentByAutomergeId,
+} from "../storage/database.ts";
 
 /**
  * Create an ACL resolver backed by our database.
@@ -29,9 +33,11 @@ function createACLResolver(): ACLResolver {
  * Map an automerge document ID to our prefixed document ID.
  *
  * Automerge uses IDs like "4NMNnkMhL8jXrdJ9jamS58PAVdXu".
- * We use IDs like "doc:4NMNnkMhL8jXrdJ9jamS58PAVdXu".
+ * We use IDs like "doc:namespace-4NMNnkMhL8jXrdJ9jamS58PAVdXu".
  *
- * If the ID already has a prefix, use it as-is.
+ * This function first checks if there's a document registered with
+ * this automerge ID, and returns its full document ID if found.
+ * Otherwise falls back to simple prefix mapping.
  */
 function mapAutomergeIdToOurId(automergeId: string): string {
   // If it already has our prefix, use it
@@ -41,6 +47,12 @@ function mapAutomergeIdToOurId(automergeId: string): string {
     automergeId.startsWith("eph:")
   ) {
     return automergeId;
+  }
+
+  // Look up by automerge ID in the database
+  const doc = getDocumentByAutomergeId(automergeId);
+  if (doc) {
+    return doc.id;
   }
 
   // Default to doc: prefix for unrecognized IDs

@@ -42,7 +42,7 @@ export async function documentRoutes(fastify: FastifyInstance): Promise<void> {
       return;
     }
 
-    const { id, type, acl, expiresAt } = result.data;
+    const { id, automergeId, type, acl, expiresAt } = result.data;
     const userId = request.auth!.userId;
 
     // Validate document type
@@ -100,6 +100,7 @@ export async function documentRoutes(fastify: FastifyInstance): Promise<void> {
       id,
       ownerId: userId,
       ...(type ? { type } : {}),
+      ...(automergeId ? { automergeId } : {}),
     });
 
     // Set ACL if provided

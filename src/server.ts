@@ -24,6 +24,7 @@ export async function createServer(_config: Config) {
   await server.register(cors, {
     origin: true, // TODO: Configure allowed origins
     credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
   });
 
   await server.register(cookie);

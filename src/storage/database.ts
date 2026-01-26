@@ -51,6 +51,7 @@ function runMigrations(): void {
     `CREATE TABLE IF NOT EXISTS documents (
       id TEXT PRIMARY KEY,
       owner_id TEXT NOT NULL REFERENCES users(id),
+      automerge_id TEXT,
       type TEXT,
       size INTEGER DEFAULT 0,
       expires_at TEXT,
@@ -73,6 +74,16 @@ function runMigrations(): void {
 
   for (const sql of migrations) {
     db.exec(sql);
+  }
+
+  // Migration: Add automerge_id column if it doesn't exist (may fail if already exists)
+  try {
+    db.exec(`ALTER TABLE documents ADD COLUMN automerge_id TEXT`);
+    db.exec(
+      `CREATE INDEX IF NOT EXISTS idx_documents_automerge ON documents(automerge_id) WHERE automerge_id IS NOT NULL`,
+    );
+  } catch {
+    // Column already exists, ignore
   }
 }
 
@@ -124,23 +135,36 @@ export function createDocument(doc: {
   id: string;
   ownerId: string;
   type?: string;
+  automergeId?: string;
 }): DocumentMetadata {
   const stmt = getDb().prepare(`
-    INSERT INTO documents (id, owner_id, type)
-    VALUES (?, ?, ?)
+    INSERT INTO documents (id, owner_id, type, automerge_id)
+    VALUES (?, ?, ?, ?)
     RETURNING *
   `);
 
-  const row = stmt.get(doc.id, doc.ownerId, doc.type ?? null) as Record<
-    string,
-    unknown
-  >;
+  const row = stmt.get(
+    doc.id,
+    doc.ownerId,
+    doc.type ?? null,
+    doc.automergeId ?? null,
+  ) as Record<string, unknown>;
   return rowToDocument(row);
 }
 
 export function getDocument(id: string): DocumentMetadata | null {
   const stmt = getDb().prepare("SELECT * FROM documents WHERE id = ?");
   const row = stmt.get(id) as Record<string, unknown> | undefined;
+  return row ? rowToDocument(row) : null;
+}
+
+export function getDocumentByAutomergeId(
+  automergeId: string,
+): DocumentMetadata | null {
+  const stmt = getDb().prepare(
+    "SELECT * FROM documents WHERE automerge_id = ?",
+  );
+  const row = stmt.get(automergeId) as Record<string, unknown> | undefined;
   return row ? rowToDocument(row) : null;
 }
 
@@ -187,6 +211,7 @@ function rowToDocument(row: Record<string, unknown>): DocumentMetadata {
   return {
     id: row.id as string,
     ownerId: row.owner_id as string,
+    automergeId: (row.automerge_id as string) ?? null,
     type: row.type as string,
     size: row.size as number,
     expiresAt: row.expires_at ? new Date(row.expires_at as string) : null,

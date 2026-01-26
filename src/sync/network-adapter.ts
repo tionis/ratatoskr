@@ -18,6 +18,7 @@ import type { WebSocket } from "@fastify/websocket";
 import { verifyApiToken, verifySessionToken } from "../auth/tokens.ts";
 import { config } from "../config.ts";
 import { checkRateLimit } from "../lib/rate-limit.ts";
+import { getDocumentByAutomergeId } from "../storage/database.ts";
 import { ephemeralManager, isEphemeralId } from "./ephemeral.ts";
 import { canReadDocument } from "./permissions.ts";
 
@@ -331,18 +332,29 @@ export class ServerNetworkAdapter extends NetworkAdapter {
         }
       }
 
-      const canRead = await canReadDocument(docId, client.userId);
+      // Check if document exists by automerge ID
+      const existingDoc = getDocumentByAutomergeId(docId);
 
-      if (!canRead) {
-        client.socket.send(
-          cbor.encode({
-            type: "error",
-            error: "permission_denied",
-            documentId: docId,
-            message: "Read access required",
-          }),
-        );
-        return;
+      // If document doesn't exist and user is authenticated, allow sync
+      // The client will create the document metadata via API
+      // This handles the race condition where sync starts before API registration
+      if (!existingDoc && client.userId && !client.isAnonymous) {
+        // Allow the sync to proceed - document will be registered via API
+        // Skip permission check for unregistered documents from authenticated users
+      } else {
+        const canRead = await canReadDocument(docId, client.userId);
+
+        if (!canRead) {
+          client.socket.send(
+            cbor.encode({
+              type: "error",
+              error: "permission_denied",
+              documentId: docId,
+              message: "Read access required",
+            }),
+          );
+          return;
+        }
       }
     }
 

@@ -292,6 +292,15 @@ body {
   text-overflow: ellipsis;
 }
 
+/* Viewer mode - limited sidebar for unauthenticated users */
+.sidebar.viewer-mode .sidebar-section {
+  opacity: 0.6;
+}
+
+.sidebar.viewer-mode .sidebar-section-header {
+  pointer-events: none;
+}
+
 /* ============ Main Content ============ */
 
 .main-content {
@@ -449,6 +458,18 @@ body {
 
 .editor::placeholder {
   color: var(--color-text-muted);
+}
+
+.editor.readonly,
+.doc-title-input.readonly {
+  background: var(--color-surface);
+  cursor: default;
+  opacity: 0.8;
+}
+
+.editor.readonly:focus,
+.doc-title-input.readonly:focus {
+  border-color: var(--color-border);
 }
 
 .editor-footer {
@@ -617,6 +638,22 @@ body {
   font-size: 0.875rem;
   font-weight: 600;
   margin-bottom: 0.75rem;
+}
+
+.share-link-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.share-link-input {
+  flex: 1;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+  font-family: "SF Mono", "Fira Code", monospace;
+  padding: 0.5rem 0.75rem;
 }
 
 .share-add-form {

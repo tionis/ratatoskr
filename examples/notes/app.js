@@ -4,7 +4,7 @@
 // - app:dev.tionis.notes - Index document tracking all notes
 // - doc:dev.tionis.notes-{id} - Individual note documents
 
-const SERVER_URL = "https://ratatoskr.tionis.dev";
+const SERVER_URL = "http://localhost:4151";
 const APP_NAMESPACE = "dev.tionis.notes";
 const APP_DOC_URL_KEY = `ratatoskr:${APP_NAMESPACE}:app-url`;
 
@@ -23,6 +23,7 @@ let currentDocHandle = null;
 let currentAcl = [];
 let isOwner = false;
 let pendingConfirmCallback = null;
+let isViewerMode = false; // True when viewing without full auth
 
 // DOM Elements
 const loginScreen = document.getElementById("login-screen");
@@ -41,10 +42,6 @@ async function initializeClient() {
     client = new RatatoskrClient({
       serverUrl: SERVER_URL,
     });
-    console.log(
-      "Client initialized, token in localStorage:",
-      localStorage.getItem("ratatoskr:token") ? "present" : "absent",
-    );
     return true;
   } catch (err) {
     console.error("Failed to load Ratatoskr client:", err);
@@ -60,7 +57,8 @@ async function initializeAppDocument() {
   if (appDocUrl) {
     // Try to find existing app document
     try {
-      appDocHandle = repo.find(appDocUrl);
+      // repo.find() returns a Promise in newer automerge-repo versions
+      appDocHandle = await repo.find(appDocUrl);
       await waitForHandle(appDocHandle);
 
       const doc = getDocFromHandle(appDocHandle);
@@ -84,9 +82,11 @@ async function initializeAppDocument() {
   localStorage.setItem(APP_DOC_URL_KEY, appDocUrl);
 
   // Register with server FIRST (before .change() triggers sync)
+  const appAutomergeId = appDocUrl.replace("automerge:", "");
   try {
     await client.createDocument({
-      id: `app:${APP_NAMESPACE}-${appDocUrl.replace("automerge:", "")}`,
+      id: `app:${APP_NAMESPACE}-${appAutomergeId}`,
+      automergeId: appAutomergeId,
       type: "app-index",
     });
   } catch (err) {
@@ -129,9 +129,6 @@ function getDocFromHandle(handle) {
  * Works with different automerge-repo versions.
  */
 async function waitForHandle(handle, timeoutMs = 5000) {
-  console.log("waitForHandle: handle type =", typeof handle);
-  console.log("waitForHandle: handle methods =", Object.keys(handle || {}));
-
   if (!handle) {
     throw new Error("Invalid handle: null or undefined");
   }
@@ -167,6 +164,70 @@ async function waitForHandle(handle, timeoutMs = 5000) {
     };
     check();
   });
+}
+
+// ============ URL Hash Routing ============
+
+/**
+ * Get document info from URL hash.
+ * Supports formats:
+ * - #noteId (short note ID from local index)
+ * - #automerge:hash (full automerge URL)
+ * - #hash (just the automerge hash)
+ */
+function getDocFromHash() {
+  const hash = window.location.hash.slice(1); // Remove #
+  if (!hash) return null;
+
+  // Full automerge URL
+  if (hash.startsWith("automerge:")) {
+    return { type: "automerge", url: hash };
+  }
+
+  // Check if it's a note ID from our index
+  const notes = getNotesFromAppDoc();
+  const note = notes.find((n) => n.id === hash);
+  if (note) {
+    return { type: "note", note };
+  }
+
+  // Assume it's an automerge hash
+  return { type: "automerge", url: `automerge:${hash}` };
+}
+
+/**
+ * Update URL hash when opening a document.
+ * Uses the short note ID if available, otherwise the automerge hash.
+ */
+function setDocHash(noteInfo, automergeUrl) {
+  if (noteInfo?.id) {
+    window.location.hash = noteInfo.id;
+  } else if (automergeUrl) {
+    // Use just the hash part for cleaner URLs
+    const hash = automergeUrl.replace("automerge:", "");
+    window.location.hash = hash;
+  }
+}
+
+/**
+ * Clear the URL hash.
+ */
+function clearDocHash() {
+  history.pushState(
+    null,
+    "",
+    window.location.pathname + window.location.search,
+  );
+}
+
+/**
+ * Get a shareable link for the current document.
+ * Uses the automerge hash for maximum compatibility.
+ */
+function getShareableLink() {
+  if (!currentDocId) return null;
+  const hash = currentDocId.replace("automerge:", "");
+  return `${window.location.origin}${window.location.pathname}#${hash}`;
 }
 
 // ============ Utility Functions ============
@@ -219,47 +280,38 @@ function generateNoteId() {
 // ============ Authentication ============
 
 async function checkAuth() {
-  console.log("checkAuth: isAuthenticated =", client.isAuthenticated());
-  console.log(
-    "checkAuth: hasStoredCredentials =",
-    client.hasStoredCredentials(),
-  );
-  console.log("checkAuth: user =", client.getUser());
+  const hashDoc = getDocFromHash();
 
   if (client.isAuthenticated()) {
     currentUser = client.getUser();
+    isViewerMode = false;
     showMainApp();
     repo = client.getRepo();
-
-    // Debug: Check what repo actually is
-    console.log("repo type:", typeof repo);
-    console.log("repo constructor:", repo?.constructor?.name);
-    console.log(
-      "repo methods:",
-      Object.getOwnPropertyNames(Object.getPrototypeOf(repo || {})),
-    );
-    console.log("repo.create type:", typeof repo?.create);
-    console.log("repo.find type:", typeof repo?.find);
-
-    // Test creating a document
-    if (repo && typeof repo.create === "function") {
-      const testHandle = repo.create();
-      console.log("testHandle type:", typeof testHandle);
-      console.log("testHandle constructor:", testHandle?.constructor?.name);
-      console.log(
-        "testHandle prototype methods:",
-        Object.getOwnPropertyNames(Object.getPrototypeOf(testHandle || {})),
-      );
-      console.log("testHandle own keys:", Object.keys(testHandle || {}));
-      console.log("testHandle.doc type:", typeof testHandle?.doc);
-      console.log("testHandle.change type:", typeof testHandle?.change);
-      console.log("testHandle.url:", testHandle?.url);
-    }
-
     await initializeAppDocument();
     renderDocumentList();
+
+    // If there's a document in the URL, try to open it
+    if (hashDoc) {
+      await openDocFromHash(hashDoc);
+    }
+  } else if (hashDoc) {
+    // Not logged in, but there's a document to view
+    // Show viewer mode
+    isViewerMode = true;
+    showViewerMode(hashDoc);
   } else {
     showLogin();
+  }
+}
+
+/**
+ * Handle opening a document from URL hash info.
+ */
+async function openDocFromHash(hashDoc) {
+  if (hashDoc.type === "note" && hashDoc.note) {
+    await openDocumentByUrl(hashDoc.note.url, hashDoc.note);
+  } else if (hashDoc.type === "automerge" && hashDoc.url) {
+    await openDocumentByUrl(hashDoc.url);
   }
 }
 
@@ -271,17 +323,128 @@ function showLogin() {
 function showMainApp() {
   loginScreen.classList.add("hidden");
   mainApp.classList.remove("hidden");
-  document.getElementById("user-name").textContent =
-    currentUser?.name || currentUser?.email || currentUser?.id || "User";
+
+  if (isViewerMode) {
+    document.getElementById("user-name").textContent = "Viewer";
+    document.getElementById("sidebar").classList.add("viewer-mode");
+  } else {
+    document.getElementById("user-name").textContent =
+      currentUser?.name || currentUser?.email || currentUser?.id || "User";
+    document.getElementById("sidebar").classList.remove("viewer-mode");
+  }
+}
+
+/**
+ * Show the app in viewer mode for unauthenticated users viewing a shared document.
+ */
+async function showViewerMode(hashDoc) {
+  showMainApp();
+
+  // Hide elements that require authentication
+  document.getElementById("new-doc-btn").style.display = "none";
+  document.getElementById("refresh-docs-btn").style.display = "none";
+  document.getElementById("settings-btn").style.display = "none";
+  document.getElementById("owned-docs-list").innerHTML =
+    '<div class="empty-state-small">Sign in to see your documents</div>';
+  document.getElementById("shared-docs-list").innerHTML = "";
+
+  // Show login prompt in sidebar footer
+  const footer = document.querySelector(".sidebar-footer .user-menu");
+  footer.innerHTML = `
+    <button id="viewer-login-btn" class="btn btn-primary btn-small">Sign In</button>
+  `;
+  document
+    .getElementById("viewer-login-btn")
+    .addEventListener("click", handleLogin);
+
+  // Try to open the document anonymously
+  // This will work for public documents
+  try {
+    // Get repo - will connect anonymously since no token is set
+    repo = client.getRepo();
+
+    if (hashDoc.type === "automerge" && hashDoc.url) {
+      await openDocumentByUrl(hashDoc.url, null, { readOnly: true });
+    }
+  } catch (err) {
+    console.error("Failed to open document in viewer mode:", err);
+    showViewerLoginPrompt();
+  }
+}
+
+/**
+ * Show login prompt when document requires authentication.
+ */
+function showViewerLoginPrompt() {
+  showToast("Sign in to view this document", "info");
+
+  // Show login prompt in the main area
+  welcomeView.classList.remove("hidden");
+  editorView.classList.add("hidden");
+  document.querySelector(".welcome-content h2").textContent = "Sign in to view";
+  document.querySelector(".welcome-content p").textContent =
+    "This document may require authentication to view.";
+  document.getElementById("welcome-new-doc-btn").textContent = "Sign In";
+  document.getElementById("welcome-new-doc-btn").onclick = handleLogin;
 }
 
 async function handleLogin() {
+  // Remember if we were viewing a document before login
+  const wasViewingDoc = isViewerMode && currentDocId;
+  const docToReopen = currentDocId;
+
   try {
     currentUser = await client.login();
+    isViewerMode = false;
+
+    // Reset UI elements that were hidden in viewer mode
+    document.getElementById("new-doc-btn").style.display = "";
+    document.getElementById("refresh-docs-btn").style.display = "";
+    document.getElementById("settings-btn").style.display = "";
+
+    // Reset welcome view content
+    document.querySelector(".welcome-content h2").textContent =
+      "Welcome to Ratatoskr Notes";
+    document.querySelector(".welcome-content p").textContent =
+      "Select a document from the sidebar or create a new one to get started.";
+    document.getElementById("welcome-new-doc-btn").textContent =
+      "Create Your First Document";
+    document.getElementById("welcome-new-doc-btn").onclick = () =>
+      openModal("new-doc-modal");
+
+    // Restore sidebar footer
+    const footer = document.querySelector(".sidebar-footer .user-menu");
+    footer.innerHTML = `
+      <span id="user-name" class="user-name">User</span>
+      <button id="settings-btn" class="btn-icon" title="Settings">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/>
+        </svg>
+      </button>
+      <button id="logout-btn" class="btn-icon" title="Logout">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/>
+        </svg>
+      </button>
+    `;
+    document
+      .getElementById("settings-btn")
+      .addEventListener("click", openSettings);
+    document
+      .getElementById("logout-btn")
+      .addEventListener("click", handleLogout);
+
     showMainApp();
     repo = client.getRepo();
     await initializeAppDocument();
     renderDocumentList();
+
+    // If we were viewing a document, reopen it with full permissions
+    if (wasViewingDoc && docToReopen) {
+      closeDocument();
+      await openDocumentByUrl(docToReopen);
+    }
+
     showToast("Welcome back!", "success");
   } catch (err) {
     showToast(err.message, "error");
@@ -357,11 +520,16 @@ async function createDocument(title) {
     // Create local automerge document
     const handle = repo.create();
     const docUrl = handle.url;
-    const serverId = `doc:${APP_NAMESPACE}-${docUrl.replace("automerge:", "")}`;
+    const automergeId = docUrl.replace("automerge:", "");
+    const serverId = `doc:${APP_NAMESPACE}-${automergeId}`;
 
     // Register with server FIRST (before .change() triggers sync)
     try {
-      await client.createDocument({ id: serverId, type: "note" });
+      await client.createDocument({
+        id: serverId,
+        automergeId: automergeId,
+        type: "note",
+      });
     } catch (err) {
       console.warn("Could not register document with server:", err);
     }
@@ -406,54 +574,91 @@ function openDocument(noteId) {
   openDocumentByUrl(note.url, note);
 }
 
-async function openDocumentByUrl(docUrl, noteInfo = null) {
+async function openDocumentByUrl(docUrl, noteInfo = null, options = {}) {
+  const { readOnly = false } = options;
+
   // Close previous document if open
   if (currentDocHandle) {
     currentDocHandle.off("change", handleDocumentChange);
   }
 
-  // Find note info if not provided
-  if (!noteInfo) {
+  // Find note info if not provided (only if authenticated)
+  if (!noteInfo && !isViewerMode) {
     const notes = getNotesFromAppDoc();
     noteInfo = notes.find((n) => n.url === docUrl);
   }
 
   currentDocId = docUrl;
   currentServerId = noteInfo?.serverId || null;
-  isOwner = true; // For now, assume ownership of our namespaced docs
+
+  // Determine ownership - only owner if authenticated and it's our doc
+  isOwner = !isViewerMode && !readOnly && !!noteInfo;
+
+  // Update URL hash
+  setDocHash(noteInfo, docUrl);
 
   // Update UI
   welcomeView.classList.add("hidden");
   editorView.classList.remove("hidden");
 
-  // Update sidebar active state
-  document.querySelectorAll(".doc-item").forEach((item) => {
-    const notes = getNotesFromAppDoc();
-    const note = notes.find((n) => n.id === item.dataset.id);
-    item.classList.toggle("active", note?.url === docUrl);
-  });
+  // Update sidebar active state (only if not in viewer mode)
+  if (!isViewerMode) {
+    document.querySelectorAll(".doc-item").forEach((item) => {
+      const notes = getNotesFromAppDoc();
+      const note = notes.find((n) => n.id === item.dataset.id);
+      item.classList.toggle("active", note?.url === docUrl);
+    });
+  }
 
-  // Show owner buttons
-  document.getElementById("share-btn").style.display = "";
-  document.getElementById("delete-doc-btn").style.display = "";
+  // Show/hide owner buttons based on ownership
+  document.getElementById("share-btn").style.display = isOwner ? "" : "none";
+  document.getElementById("delete-doc-btn").style.display = isOwner
+    ? ""
+    : "none";
+
+  // Handle read-only mode
+  const titleInput = document.getElementById("doc-title-input");
+  if (readOnly || isViewerMode) {
+    editor.setAttribute("readonly", "true");
+    titleInput.setAttribute("readonly", "true");
+    editor.classList.add("readonly");
+    titleInput.classList.add("readonly");
+  } else {
+    editor.removeAttribute("readonly");
+    titleInput.removeAttribute("readonly");
+    editor.classList.remove("readonly");
+    titleInput.classList.remove("readonly");
+  }
 
   setSyncStatus("syncing");
 
   try {
-    // Get document handle
-    currentDocHandle = repo.find(docUrl);
-    await waitForHandle(currentDocHandle);
+    // Get document handle (repo.find returns a Promise)
+    currentDocHandle = await repo.find(docUrl);
+
+    // Set up a timeout for viewer mode - document may not be accessible
+    const loadPromise = waitForHandle(
+      currentDocHandle,
+      isViewerMode ? 10000 : 5000,
+    );
+
+    await loadPromise;
 
     // Load content
     const doc = getDocFromHandle(currentDocHandle);
     if (!doc) {
+      if (isViewerMode) {
+        // In viewer mode, show login prompt if document isn't accessible
+        showViewerLoginPrompt();
+        return;
+      }
       showToast("Document unavailable - may need to sync", "error");
       setSyncStatus("error");
       currentDocHandle = null;
       return;
     }
 
-    document.getElementById("doc-title-input").value = doc.title || "";
+    titleInput.value = doc.title || "";
     editor.value = doc.content || "";
     updateCharCount();
 
@@ -462,6 +667,11 @@ async function openDocumentByUrl(docUrl, noteInfo = null) {
 
     setSyncStatus("synced");
   } catch (err) {
+    if (isViewerMode) {
+      // In viewer mode, show login prompt for any error
+      showViewerLoginPrompt();
+      return;
+    }
     showToast(`Failed to open document: ${err.message}`, "error");
     setSyncStatus("error");
     currentDocHandle = null;
@@ -499,8 +709,17 @@ function closeDocument() {
   currentDocId = null;
   currentServerId = null;
 
+  // Clear URL hash
+  clearDocHash();
+
   welcomeView.classList.remove("hidden");
   editorView.classList.add("hidden");
+
+  // Reset readonly state
+  editor.removeAttribute("readonly");
+  document.getElementById("doc-title-input").removeAttribute("readonly");
+  editor.classList.remove("readonly");
+  document.getElementById("doc-title-input").classList.remove("readonly");
 
   document.querySelectorAll(".doc-item").forEach((item) => {
     item.classList.remove("active");
@@ -641,6 +860,10 @@ async function openShareModal() {
 
   document.getElementById("share-doc-title").textContent =
     document.getElementById("doc-title-input").value || "Untitled";
+
+  // Populate shareable link
+  const shareLink = getShareableLink();
+  document.getElementById("share-link-input").value = shareLink || "";
 
   openModal("share-modal");
 
@@ -1036,6 +1259,26 @@ document.addEventListener("DOMContentLoaded", async () => {
         showToast("Session expired, please log in again", "warning");
         handleLogout();
         break;
+    }
+  });
+
+  // Hash change listener for navigation
+  window.addEventListener("hashchange", async () => {
+    const hashDoc = getDocFromHash();
+    if (hashDoc && client.isAuthenticated()) {
+      await openDocFromHash(hashDoc);
+    } else if (!hashDoc && currentDocId) {
+      // Hash was cleared, close document
+      closeDocument();
+    }
+  });
+
+  // Copy link button in share modal
+  document.getElementById("copy-link-btn")?.addEventListener("click", () => {
+    const link = getShareableLink();
+    if (link) {
+      navigator.clipboard.writeText(link);
+      showToast("Link copied to clipboard", "success");
     }
   });
 

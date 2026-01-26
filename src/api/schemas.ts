@@ -11,6 +11,7 @@ const flexibleDatetime = z
 // Document creation
 export const createDocumentSchema = z.object({
   id: documentIdSchema,
+  automergeId: z.string().max(100).optional(),
   type: z.string().max(200).optional(),
   acl: z.array(aclEntrySchema).optional(),
   expiresAt: flexibleDatetime.optional(),

@@ -53,6 +53,7 @@ export interface User {
 export interface DocumentMetadata {
   id: string;
   ownerId: string;
+  automergeId: string | null;
   type: string;
   size: number;
   expiresAt: Date | null;

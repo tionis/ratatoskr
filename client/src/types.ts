@@ -25,6 +25,7 @@ export interface DocumentMetadata {
 
 export interface CreateDocumentRequest {
   id: string;
+  automergeId?: string;
   type?: string;
   acl?: ACLEntry[];
   expiresAt?: string;
