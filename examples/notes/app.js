@@ -57,7 +57,7 @@ async function initializeAppDocument() {
     // Try to find existing app document
     try {
       appDocHandle = repo.find(appDocUrl);
-      await appDocHandle.whenReady(["ready", "unavailable"]);
+      await waitForHandle(appDocHandle);
 
       const doc = appDocHandle.doc();
       if (doc && Object.keys(doc).length > 0) {
@@ -67,6 +67,8 @@ async function initializeAppDocument() {
       }
     } catch (err) {
       console.warn("Could not load app document, creating new one:", err);
+      // Clear invalid URL from storage
+      localStorage.removeItem(APP_DOC_URL_KEY);
     }
   }
 
@@ -97,6 +99,42 @@ async function initializeAppDocument() {
 
   // Listen for changes
   appDocHandle.on("change", () => renderDocumentList());
+}
+
+// ============ Helper Functions ============
+
+/**
+ * Wait for a document handle to be ready.
+ * Works with different automerge-repo versions.
+ */
+async function waitForHandle(handle, timeoutMs = 5000) {
+  // If handle has whenReady method, use it
+  if (typeof handle.whenReady === "function") {
+    try {
+      await handle.whenReady(["ready", "unavailable"]);
+      return;
+    } catch (err) {
+      console.warn("whenReady failed:", err);
+    }
+  }
+
+  // Fallback: poll until doc() returns something or timeout
+  const startTime = Date.now();
+  return new Promise((resolve, reject) => {
+    const check = () => {
+      const doc = handle.doc();
+      if (doc !== undefined) {
+        resolve();
+        return;
+      }
+      if (Date.now() - startTime > timeoutMs) {
+        reject(new Error("Timeout waiting for document"));
+        return;
+      }
+      setTimeout(check, 100);
+    };
+    check();
+  });
 }
 
 // ============ Utility Functions ============
@@ -339,23 +377,20 @@ async function openDocumentByUrl(docUrl, noteInfo = null) {
   try {
     // Get document handle
     currentDocHandle = repo.find(docUrl);
-    await currentDocHandle.whenReady(["ready", "unavailable"]);
+    await waitForHandle(currentDocHandle);
 
-    // Check if document is actually available
-    if (!currentDocHandle.isReady || !currentDocHandle.isReady()) {
+    // Load content
+    const doc = currentDocHandle.doc();
+    if (!doc) {
       showToast("Document unavailable - may need to sync", "error");
       setSyncStatus("error");
       currentDocHandle = null;
       return;
     }
 
-    // Load content
-    const doc = currentDocHandle.doc();
-    if (doc) {
-      document.getElementById("doc-title-input").value = doc.title || "";
-      editor.value = doc.content || "";
-      updateCharCount();
-    }
+    document.getElementById("doc-title-input").value = doc.title || "";
+    editor.value = doc.content || "";
+    updateCharCount();
 
     // Listen for remote changes
     currentDocHandle.on("change", handleDocumentChange);
