@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ratatoskr Notes</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Login Screen -->
+    <div id="login-screen" class="screen">
+      <div class="login-container">
+        <div class="logo">
+          <h1>Ratatoskr Notes</h1>
+          <p>Collaborative Document Editing</p>
+        </div>
+        <button id="login-btn" class="btn btn-primary btn-large">
+          Sign in to Continue
+        </button>
+        <p class="login-hint">Create and share documents with real-time collaboration</p>
+      </div>
+    </div>
+
+    <!-- Main App -->
+    <div id="main-app" class="screen hidden">
+      <!-- Sidebar -->
+      <aside id="sidebar" class="sidebar">
+        <div class="sidebar-header">
+          <h1 class="sidebar-title">Ratatoskr</h1>
+          <button id="new-doc-btn" class="btn btn-primary btn-small">+ New</button>
+        </div>
+
+        <div class="sidebar-section">
+          <div class="sidebar-section-header">
+            <span>My Documents</span>
+            <button class="btn-icon" id="refresh-docs-btn" title="Refresh">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
+              </svg>
+            </button>
+          </div>
+          <div id="owned-docs-list" class="doc-list">
+            <div class="loading-small">Loading...</div>
+          </div>
+        </div>
+
+        <div class="sidebar-section">
+          <div class="sidebar-section-header">
+            <span>Shared with Me</span>
+          </div>
+          <div id="shared-docs-list" class="doc-list">
+            <div class="loading-small">Loading...</div>
+          </div>
+        </div>
+
+        <div class="sidebar-footer">
+          <div class="user-menu">
+            <span id="user-name" class="user-name">User</span>
+            <button id="settings-btn" class="btn-icon" title="Settings">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/>
+              </svg>
+            </button>
+            <button id="logout-btn" class="btn-icon" title="Logout">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Main Content Area -->
+      <main id="main-content" class="main-content">
+        <!-- Welcome/Empty State -->
+        <div id="welcome-view" class="welcome-view">
+          <div class="welcome-content">
+            <h2>Welcome to Ratatoskr Notes</h2>
+            <p>Select a document from the sidebar or create a new one to get started.</p>
+            <button id="welcome-new-doc-btn" class="btn btn-primary btn-large">
+              Create Your First Document
+            </button>
+          </div>
+        </div>
+
+        <!-- Editor View -->
+        <div id="editor-view" class="editor-view hidden">
+          <div class="editor-toolbar">
+            <div class="editor-toolbar-left">
+              <button id="back-btn" class="btn btn-secondary btn-small">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M19 12H5M12 19l-7-7 7-7"/>
+                </svg>
+                Back
+              </button>
+              <div class="doc-title-container">
+                <input type="text" id="doc-title-input" class="doc-title-input" placeholder="Untitled Document">
+                <span id="sync-status" class="sync-status">
+                  <span class="sync-dot"></span>
+                  <span class="sync-text">Synced</span>
+                </span>
+              </div>
+            </div>
+            <div class="editor-toolbar-right">
+              <button id="share-btn" class="btn btn-secondary btn-small">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
+                  <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
+                </svg>
+                Share
+              </button>
+              <button id="delete-doc-btn" class="btn btn-danger btn-small">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+          <div class="editor-container">
+            <textarea id="editor" class="editor" placeholder="Start typing..."></textarea>
+          </div>
+          <div class="editor-footer">
+            <span id="char-count">0 characters</span>
+            <span id="collaborators"></span>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <!-- Modals -->
+    <!-- New Document Modal -->
+    <div id="new-doc-modal" class="modal hidden">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2>Create New Document</h2>
+          <button class="modal-close">&times;</button>
+        </div>
+        <form id="new-doc-form">
+          <div class="form-group">
+            <label for="new-doc-title">Title</label>
+            <input type="text" id="new-doc-title" placeholder="My Document" autofocus>
+          </div>
+          <div class="form-group">
+            <label for="new-doc-id">Document ID (optional)</label>
+            <input type="text" id="new-doc-id" placeholder="auto-generated if empty">
+            <small>Use lowercase letters, numbers, and hyphens only</small>
+          </div>
+          <div class="form-actions">
+            <button type="button" class="btn btn-secondary modal-cancel">Cancel</button>
+            <button type="submit" class="btn btn-primary">Create</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Share Modal -->
+    <div id="share-modal" class="modal hidden">
+      <div class="modal-content modal-large">
+        <div class="modal-header">
+          <h2>Share Document</h2>
+          <button class="modal-close">&times;</button>
+        </div>
+        <div class="share-content">
+          <div id="share-doc-title" class="share-doc-title"></div>
+
+          <div class="share-section">
+            <h3>Add People</h3>
+            <div class="share-add-form">
+              <input type="text" id="share-user-input" placeholder="Enter user ID">
+              <select id="share-permission">
+                <option value="read">Can view</option>
+                <option value="write">Can edit</option>
+              </select>
+              <button id="share-add-btn" class="btn btn-primary">Add</button>
+            </div>
+          </div>
+
+          <div class="share-section">
+            <h3>People with Access</h3>
+            <div id="share-list" class="share-list">
+              <div class="loading-small">Loading...</div>
+            </div>
+          </div>
+
+          <div class="share-section">
+            <h3>Public Access</h3>
+            <div class="public-access-toggle">
+              <label class="toggle-label">
+                <input type="checkbox" id="public-read-toggle">
+                <span class="toggle-switch"></span>
+                <span>Anyone can view this document</span>
+              </label>
+            </div>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button class="btn btn-secondary modal-cancel">Close</button>
+          <button id="share-save-btn" class="btn btn-primary">Save Changes</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="modal hidden">
+      <div class="modal-content modal-large">
+        <div class="modal-header">
+          <h2>Settings</h2>
+          <button class="modal-close">&times;</button>
+        </div>
+        <div class="settings-content">
+          <div class="settings-tabs">
+            <button class="settings-tab active" data-tab="account">Account</button>
+            <button class="settings-tab" data-tab="tokens">API Tokens</button>
+          </div>
+
+          <div id="account-settings" class="settings-panel">
+            <div class="info-card">
+              <h3>User Information</h3>
+              <div id="account-details">
+                <div class="loading-small">Loading...</div>
+              </div>
+            </div>
+            <div class="info-card">
+              <h3>Storage Usage</h3>
+              <div id="quota-info">
+                <div class="loading-small">Loading...</div>
+              </div>
+            </div>
+          </div>
+
+          <div id="tokens-settings" class="settings-panel hidden">
+            <div class="tokens-header">
+              <p>API tokens allow external applications to access your documents.</p>
+              <button id="create-token-btn" class="btn btn-primary btn-small">+ Create Token</button>
+            </div>
+            <div id="tokens-list" class="tokens-list">
+              <div class="loading-small">Loading...</div>
+            </div>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button class="btn btn-secondary modal-cancel">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Create Token Modal -->
+    <div id="create-token-modal" class="modal hidden">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2>Create API Token</h2>
+          <button class="modal-close">&times;</button>
+        </div>
+        <form id="create-token-form">
+          <div class="form-group">
+            <label for="token-name">Token Name</label>
+            <input type="text" id="token-name" placeholder="e.g., CLI Tool" required>
+          </div>
+          <div class="form-group">
+            <label>Permissions</label>
+            <div class="checkbox-group">
+              <label class="checkbox-label">
+                <input type="checkbox" name="scope" value="read" checked>
+                Read - Access documents
+              </label>
+              <label class="checkbox-label">
+                <input type="checkbox" name="scope" value="write">
+                Write - Modify documents
+              </label>
+            </div>
+          </div>
+          <div class="form-actions">
+            <button type="button" class="btn btn-secondary modal-cancel">Cancel</button>
+            <button type="submit" class="btn btn-primary">Create</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Token Created Modal -->
+    <div id="token-created-modal" class="modal hidden">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2>Token Created</h2>
+          <button class="modal-close">&times;</button>
+        </div>
+        <div class="token-created-content">
+          <p class="warning">Copy this token now. You won't be able to see it again!</p>
+          <div class="token-display">
+            <code id="new-token-value"></code>
+            <button id="copy-token-btn" class="btn btn-secondary btn-small">Copy</button>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button class="btn btn-primary modal-cancel">Done</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Confirm Modal -->
+    <div id="confirm-modal" class="modal hidden">
+      <div class="modal-content modal-small">
+        <div class="modal-header">
+          <h2 id="confirm-title">Confirm</h2>
+          <button class="modal-close">&times;</button>
+        </div>
+        <p id="confirm-message" class="confirm-message"></p>
+        <div class="form-actions">
+          <button class="btn btn-secondary modal-cancel">Cancel</button>
+          <button id="confirm-btn" class="btn btn-danger">Delete</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div id="toast-container"></div>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
