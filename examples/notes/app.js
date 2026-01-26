@@ -1,14 +1,36 @@
 // Ratatoskr Notes - Collaborative Document Editor Example
-// This example demonstrates how to build a HedgeDoc-like collaborative editor
-// using the Ratatoskr client library.
+//
+// Document namespace: dev.tionis.notes
+// - app:dev.tionis.notes - Index document tracking all notes
+// - doc:dev.tionis.notes-{id} - Individual note documents
 
-// Configuration - adjust this to point to your Ratatoskr server
 const SERVER_URL = window.location.origin;
+const APP_NAMESPACE = "dev.tionis.notes";
+const APP_DOC_ID = `app:${APP_NAMESPACE}`;
 
-// Dynamically import the client library from the server
+// Client and repo
 let RatatoskrClient;
 let client;
-let _repo; // Reserved for future automerge-repo integration
+let repo;
+
+// App state
+let appDocHandle = null;
+let currentUser = null;
+let currentDocId = null;
+let currentDocHandle = null;
+let currentAcl = [];
+let isOwner = false;
+let pendingConfirmCallback = null;
+
+// DOM Elements
+const loginScreen = document.getElementById("login-screen");
+const mainApp = document.getElementById("main-app");
+const welcomeView = document.getElementById("welcome-view");
+const editorView = document.getElementById("editor-view");
+const editor = document.getElementById("editor");
+const toastContainer = document.getElementById("toast-container");
+
+// ============ Initialization ============
 
 async function initializeClient() {
   try {
@@ -25,22 +47,52 @@ async function initializeClient() {
   }
 }
 
-// App State
-let currentUser = null;
-let currentDocId = null;
-let currentDocHandle = null;
-let currentAcl = [];
-let isOwner = false;
-let documents = { owned: [], accessible: [] };
-let pendingConfirmCallback = null;
+async function initializeAppDocument() {
+  // Get or create the app index document
+  try {
+    // Try to find existing app document
+    appDocHandle = repo.find(APP_DOC_ID);
+    await appDocHandle.whenReady();
 
-// DOM Elements
-const loginScreen = document.getElementById("login-screen");
-const mainApp = document.getElementById("main-app");
-const welcomeView = document.getElementById("welcome-view");
-const editorView = document.getElementById("editor-view");
-const editor = document.getElementById("editor");
-const toastContainer = document.getElementById("toast-container");
+    const doc = appDocHandle.docSync();
+    if (!doc || Object.keys(doc).length === 0) {
+      // Initialize the app document structure
+      appDocHandle.change((d) => {
+        d.notes = []; // Array of { id, title, createdAt, updatedAt }
+        d.settings = {};
+        d.version = 1;
+      });
+    }
+  } catch (_err) {
+    // Create the app document on the server first
+    try {
+      await client.createDocument({ id: APP_DOC_ID, type: "app-index" });
+    } catch (createErr) {
+      // May already exist, that's fine
+      if (!createErr.message?.includes("already exists")) {
+        console.warn("Could not create app document:", createErr);
+      }
+    }
+
+    // Now find/create locally
+    appDocHandle = repo.find(APP_DOC_ID);
+    await appDocHandle.whenReady();
+
+    const doc = appDocHandle.docSync();
+    if (!doc || Object.keys(doc).length === 0) {
+      appDocHandle.change((d) => {
+        d.notes = [];
+        d.settings = {};
+        d.version = 1;
+      });
+    }
+  }
+
+  // Listen for changes to the app document (e.g., from other devices)
+  appDocHandle.on("change", () => {
+    renderDocumentList();
+  });
+}
 
 // ============ Utility Functions ============
 
@@ -85,8 +137,12 @@ function formatBytes(bytes) {
   return `${parseFloat((bytes / k ** i).toFixed(2))} ${sizes[i]}`;
 }
 
-function generateId() {
-  return `note-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+function generateNoteId() {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function makeDocId(noteId) {
+  return `doc:${APP_NAMESPACE}-${noteId}`;
 }
 
 // ============ Authentication ============
@@ -95,9 +151,9 @@ async function checkAuth() {
   if (client.isAuthenticated()) {
     currentUser = client.getUser();
     showMainApp();
-    // Initialize repo for real-time sync
-    _repo = client.getRepo();
-    await loadDocuments();
+    repo = client.getRepo();
+    await initializeAppDocument();
+    renderDocumentList();
   } else {
     showLogin();
   }
@@ -119,9 +175,9 @@ async function handleLogin() {
   try {
     currentUser = await client.login();
     showMainApp();
-    // Initialize repo for real-time sync
-    _repo = client.getRepo();
-    await loadDocuments();
+    repo = client.getRepo();
+    await initializeAppDocument();
+    renderDocumentList();
     showToast("Welcome back!", "success");
   } catch (err) {
     showToast(err.message, "error");
@@ -131,7 +187,8 @@ async function handleLogin() {
 function handleLogout() {
   client.logout();
   currentUser = null;
-  _repo = null;
+  repo = null;
+  appDocHandle = null;
   closeDocument();
   showLogin();
   showToast("Logged out", "info");
@@ -139,103 +196,105 @@ function handleLogout() {
 
 // ============ Document List ============
 
-async function loadDocuments() {
+function getNotesFromAppDoc() {
+  if (!appDocHandle) return [];
+  const doc = appDocHandle.docSync();
+  return doc?.notes || [];
+}
+
+function renderDocumentList() {
   const ownedList = document.getElementById("owned-docs-list");
   const sharedList = document.getElementById("shared-docs-list");
 
-  ownedList.innerHTML = '<div class="loading-small">Loading...</div>';
-  sharedList.innerHTML = '<div class="loading-small">Loading...</div>';
+  const notes = getNotesFromAppDoc();
 
-  try {
-    const data = await client.listDocuments();
-    documents = data;
-    renderDocumentList(ownedList, data.owned, true);
-    renderDocumentList(sharedList, data.accessible, false);
-  } catch (_err) {
-    ownedList.innerHTML = '<div class="empty-state-small">Failed to load</div>';
-    sharedList.innerHTML = "";
-    showToast("Failed to load documents", "error");
-  }
-}
-
-function renderDocumentList(container, docs, owned) {
-  if (docs.length === 0) {
-    container.innerHTML = `<div class="empty-state-small">${owned ? "No documents yet" : "None shared"}</div>`;
-    return;
-  }
-
-  container.innerHTML = docs
-    .map((doc) => {
-      const title = getDocTitle(doc);
-      const isActive = doc.id === currentDocId;
-      return `
-        <div class="doc-item ${isActive ? "active" : ""}" data-id="${escapeHtml(doc.id)}">
-          <div class="doc-item-icon">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
-              <polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/>
-              <line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>
-            </svg>
+  if (notes.length === 0) {
+    ownedList.innerHTML =
+      '<div class="empty-state-small">No documents yet</div>';
+  } else {
+    ownedList.innerHTML = notes
+      .map((note) => {
+        const isActive = makeDocId(note.id) === currentDocId;
+        return `
+          <div class="doc-item ${isActive ? "active" : ""}" data-id="${escapeHtml(note.id)}">
+            <div class="doc-item-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+                <polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/>
+                <line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>
+              </svg>
+            </div>
+            <div class="doc-item-info">
+              <span class="doc-item-title">${escapeHtml(note.title || "Untitled")}</span>
+              <span class="doc-item-meta">${formatDate(note.updatedAt || note.createdAt)}</span>
+            </div>
           </div>
-          <div class="doc-item-info">
-            <span class="doc-item-title">${escapeHtml(title)}</span>
-            <span class="doc-item-meta">${formatDate(doc.updatedAt || doc.createdAt)}</span>
-          </div>
-        </div>
-      `;
-    })
-    .join("");
+        `;
+      })
+      .join("");
 
-  // Add click handlers
-  container.querySelectorAll(".doc-item").forEach((item) => {
-    item.addEventListener("click", () => openDocument(item.dataset.id));
-  });
-}
+    // Add click handlers
+    ownedList.querySelectorAll(".doc-item").forEach((item) => {
+      item.addEventListener("click", () => openDocument(item.dataset.id));
+    });
+  }
 
-function getDocTitle(doc) {
-  // Try to get title from document content or fall back to ID
-  return (
-    doc.title || doc.id.replace(/^doc[:-]/, "").replace(/-/g, " ") || "Untitled"
-  );
+  // For now, shared list shows hint about using ACLs
+  sharedList.innerHTML =
+    '<div class="empty-state-small">Share documents via ACL settings</div>';
 }
 
 // ============ Document Operations ============
 
-async function createDocument(title, customId) {
-  const id = customId || `doc:${generateId()}`;
+async function createDocument(title) {
+  const noteId = generateNoteId();
+  const docId = makeDocId(noteId);
 
   try {
-    // Create document on server via client API
-    await client.createDocument({ id, type: "note" });
+    // Create document on server
+    await client.createDocument({ id: docId, type: "note" });
 
-    // Initialize document content using offline-first API
-    // This creates local automerge document that syncs to server
-    await client.createDocumentOffline(
-      {
+    // Create local automerge document
+    const handle = repo.find(docId);
+    await handle.whenReady();
+
+    // Initialize document content
+    handle.change((doc) => {
+      doc.title = title || "Untitled";
+      doc.content = "";
+      doc.createdAt = new Date().toISOString();
+      doc.updatedAt = new Date().toISOString();
+    });
+
+    // Add to app index
+    appDocHandle.change((appDoc) => {
+      if (!appDoc.notes) appDoc.notes = [];
+      appDoc.notes.unshift({
+        id: noteId,
         title: title || "Untitled",
-        content: "",
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-      },
-      { type: "note" },
-    );
+      });
+    });
 
-    await loadDocuments();
-    await openDocument(id);
+    renderDocumentList();
+    await openDocument(noteId);
     showToast("Document created", "success");
   } catch (err) {
     showToast(err.message, "error");
   }
 }
 
-async function openDocument(docId) {
+async function openDocument(noteId) {
+  const docId = makeDocId(noteId);
+
   // Close previous document if open
   if (currentDocHandle) {
     currentDocHandle.off("change", handleDocumentChange);
   }
 
   currentDocId = docId;
-  isOwner = documents.owned.some((d) => d.id === docId);
+  isOwner = true; // For now, assume ownership of our namespaced docs
 
   // Update UI
   welcomeView.classList.add("hidden");
@@ -243,29 +302,32 @@ async function openDocument(docId) {
 
   // Update sidebar active state
   document.querySelectorAll(".doc-item").forEach((item) => {
-    item.classList.toggle("active", item.dataset.id === docId);
+    item.classList.toggle("active", makeDocId(item.dataset.id) === docId);
   });
 
-  // Show/hide owner-only buttons
-  document.getElementById("share-btn").style.display = isOwner ? "" : "none";
-  document.getElementById("delete-doc-btn").style.display = isOwner
-    ? ""
-    : "none";
+  // Show owner buttons
+  document.getElementById("share-btn").style.display = "";
+  document.getElementById("delete-doc-btn").style.display = "";
 
-  // Set sync status to loading
   setSyncStatus("syncing");
 
   try {
-    // For now, just show the document metadata
-    // Full automerge-repo integration would require mapping doc IDs to automerge URLs
-    const docMeta = await client.getDocument(docId);
+    // Get document handle
+    currentDocHandle = repo.find(docId);
+    await currentDocHandle.whenReady();
 
-    document.getElementById("doc-title-input").value = docMeta.title || docId;
-    editor.value = "";
-    updateCharCount();
+    // Load content
+    const doc = currentDocHandle.docSync();
+    if (doc) {
+      document.getElementById("doc-title-input").value = doc.title || "";
+      editor.value = doc.content || "";
+      updateCharCount();
+    }
+
+    // Listen for remote changes
+    currentDocHandle.on("change", handleDocumentChange);
 
     setSyncStatus("synced");
-    showToast("Document opened (view-only mode)", "info");
   } catch (err) {
     showToast(`Failed to open document: ${err.message}`, "error");
     setSyncStatus("error");
@@ -273,23 +335,19 @@ async function openDocument(docId) {
 }
 
 function handleDocumentChange({ doc }) {
-  // Update editor if content changed from remote
   const currentContent = editor.value;
   const newContent = doc.content || "";
 
   if (newContent !== currentContent) {
-    // Preserve cursor position as best we can
     const selStart = editor.selectionStart;
     const selEnd = editor.selectionEnd;
 
     editor.value = newContent;
 
-    // Try to restore cursor position
     editor.selectionStart = Math.min(selStart, newContent.length);
     editor.selectionEnd = Math.min(selEnd, newContent.length);
   }
 
-  // Update title if changed
   const titleInput = document.getElementById("doc-title-input");
   if (doc.title && doc.title !== titleInput.value) {
     titleInput.value = doc.title;
@@ -314,15 +372,28 @@ function closeDocument() {
   });
 }
 
-async function deleteDocument(docId) {
+async function deleteDocument(noteId) {
+  const docId = makeDocId(noteId);
+
   try {
     await client.deleteDocument(docId);
+
+    // Remove from app index
+    appDocHandle.change((appDoc) => {
+      if (appDoc.notes) {
+        const idx = appDoc.notes.findIndex((n) => n.id === noteId);
+        if (idx >= 0) {
+          appDoc.notes.splice(idx, 1);
+        }
+      }
+    });
+
     showToast("Document deleted", "success");
 
     if (currentDocId === docId) {
       closeDocument();
     }
-    await loadDocuments();
+    renderDocumentList();
   } catch (err) {
     showToast(err.message, "error");
   }
@@ -337,7 +408,6 @@ function handleEditorInput() {
 
   setSyncStatus("syncing");
 
-  // Debounce saves
   clearTimeout(saveTimeout);
   saveTimeout = setTimeout(() => {
     const content = editor.value;
@@ -345,6 +415,10 @@ function handleEditorInput() {
       doc.content = content;
       doc.updatedAt = new Date().toISOString();
     });
+
+    // Update app index with timestamp
+    updateNoteInIndex({ updatedAt: new Date().toISOString() });
+
     setSyncStatus("synced");
   }, 300);
 
@@ -360,8 +434,23 @@ function handleTitleChange() {
     doc.updatedAt = new Date().toISOString();
   });
 
-  // Update sidebar
-  loadDocuments();
+  // Update app index
+  updateNoteInIndex({ title, updatedAt: new Date().toISOString() });
+  renderDocumentList();
+}
+
+function updateNoteInIndex(updates) {
+  if (!appDocHandle || !currentDocId) return;
+
+  const noteId = currentDocId.replace(`doc:${APP_NAMESPACE}-`, "");
+
+  appDocHandle.change((appDoc) => {
+    if (!appDoc.notes) return;
+    const note = appDoc.notes.find((n) => n.id === noteId);
+    if (note) {
+      Object.assign(note, updates);
+    }
+  });
 }
 
 function updateCharCount() {
@@ -418,11 +507,9 @@ async function openShareModal() {
 function renderShareList() {
   const container = document.getElementById("share-list");
 
-  // Check for public access
   const publicEntry = currentAcl.find((e) => e.principal === "public");
   document.getElementById("public-read-toggle").checked = !!publicEntry;
 
-  // Filter out public entry for the list
   const userEntries = currentAcl.filter((e) => e.principal !== "public");
 
   if (userEntries.length === 0) {
@@ -448,7 +535,6 @@ function renderShareList() {
     )
     .join("");
 
-  // Add event listeners
   container.querySelectorAll(".share-entry-permission").forEach((select) => {
     select.addEventListener("change", (e) => {
       const idx = parseInt(e.target.dataset.idx, 10);
@@ -643,7 +729,6 @@ function showConfirm(title, message, callback) {
 // ============ Event Listeners ============
 
 document.addEventListener("DOMContentLoaded", async () => {
-  // Initialize the client first
   const initialized = await initializeClient();
   if (!initialized) {
     document.getElementById("login-btn").disabled = true;
@@ -665,8 +750,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("new-doc-form").addEventListener("submit", (e) => {
     e.preventDefault();
     const title = document.getElementById("new-doc-title").value.trim();
-    const customId = document.getElementById("new-doc-id").value.trim();
-    createDocument(title, customId ? `doc:${customId}` : null);
+    createDocument(title);
     closeModal("new-doc-modal");
     document.getElementById("new-doc-form").reset();
   });
@@ -674,7 +758,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Refresh
   document
     .getElementById("refresh-docs-btn")
-    .addEventListener("click", loadDocuments);
+    .addEventListener("click", renderDocumentList);
 
   // Editor
   editor.addEventListener("input", handleEditorInput);
@@ -700,12 +784,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Delete document
   document.getElementById("delete-doc-btn").addEventListener("click", () => {
     if (!currentDocId) return;
+    const noteId = currentDocId.replace(`doc:${APP_NAMESPACE}-`, "");
     showConfirm(
       "Delete Document",
       "Are you sure you want to delete this document? This cannot be undone.",
-      () => {
-        deleteDocument(currentDocId);
-      },
+      () => deleteDocument(noteId),
     );
   });
 
@@ -766,18 +849,15 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // Keyboard shortcuts
   document.addEventListener("keydown", (e) => {
-    // Escape to close modals
     if (e.key === "Escape") {
       closeAllModals();
     }
 
-    // Ctrl/Cmd + S to save (prevent default, auto-saved)
     if ((e.ctrlKey || e.metaKey) && e.key === "s") {
       e.preventDefault();
       showToast("Document auto-saved", "info");
     }
 
-    // Ctrl/Cmd + N for new document
     if (
       (e.ctrlKey || e.metaKey) &&
       e.key === "n" &&
@@ -788,7 +868,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
-  // Subscribe to sync events
+  // Sync events
   client.onSyncEvent((event) => {
     switch (event.type) {
       case "connectivity:changed":
