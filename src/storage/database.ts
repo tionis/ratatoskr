@@ -85,6 +85,22 @@ function runMigrations(): void {
   } catch {
     // Column already exists, ignore
   }
+
+  // Migration: Add KV store table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS kv_store (
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      namespace TEXT NOT NULL,
+      key TEXT NOT NULL,
+      value TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (user_id, namespace, key)
+    )
+  `);
+  db.exec(
+    `CREATE INDEX IF NOT EXISTS idx_kv_namespace ON kv_store(user_id, namespace)`,
+  );
 }
 
 // User operations
@@ -292,4 +308,67 @@ export function deleteExpiredTokens(): number {
   );
   const result = stmt.run();
   return result.changes;
+}
+
+// KV Store operations
+export interface KVEntry {
+  namespace: string;
+  key: string;
+  value: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export function kvGet(
+  userId: string,
+  namespace: string,
+  key: string,
+): string | null {
+  const stmt = getDb().prepare(
+    "SELECT value FROM kv_store WHERE user_id = ? AND namespace = ? AND key = ?",
+  );
+  const row = stmt.get(userId, namespace, key) as { value: string } | undefined;
+  return row?.value ?? null;
+}
+
+export function kvSet(
+  userId: string,
+  namespace: string,
+  key: string,
+  value: string,
+): void {
+  const stmt = getDb().prepare(`
+    INSERT INTO kv_store (user_id, namespace, key, value)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(user_id, namespace, key) DO UPDATE SET
+      value = excluded.value,
+      updated_at = datetime('now')
+  `);
+  stmt.run(userId, namespace, key, value);
+}
+
+export function kvDelete(
+  userId: string,
+  namespace: string,
+  key: string,
+): boolean {
+  const stmt = getDb().prepare(
+    "DELETE FROM kv_store WHERE user_id = ? AND namespace = ? AND key = ?",
+  );
+  const result = stmt.run(userId, namespace, key);
+  return result.changes > 0;
+}
+
+export function kvList(userId: string, namespace: string): KVEntry[] {
+  const stmt = getDb().prepare(
+    "SELECT namespace, key, value, created_at, updated_at FROM kv_store WHERE user_id = ? AND namespace = ?",
+  );
+  const rows = stmt.all(userId, namespace) as Record<string, unknown>[];
+  return rows.map((row) => ({
+    namespace: row.namespace as string,
+    key: row.key as string,
+    value: row.value as string,
+    createdAt: new Date(row.created_at as string),
+    updatedAt: new Date(row.updated_at as string),
+  }));
 }

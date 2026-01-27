@@ -1,8 +1,11 @@
 // Ratatoskr Notes - Collaborative Document Editor Example
 //
+// This example demonstrates the recommended app state pattern:
+// 1. Use client.getOrCreateAppDocument() to get a per-user root document
+// 2. The root document stores references to other documents (notes)
+// 3. Individual notes are synced automerge documents
+//
 // Document namespace: dev.tionis.notes
-// - app:dev.tionis.notes - User's index document (server routes to user-specific version)
-// - doc:dev.tionis.notes:{hash} - Individual note documents
 
 const SERVER_URL = "http://localhost:4151";
 const APP_NAMESPACE = "dev.tionis.notes";
@@ -50,13 +53,6 @@ async function initializeClient() {
 }
 
 /**
- * Get the localStorage key for app document URL, scoped by user ID.
- */
-function getAppDocKey(userId) {
-  return `ratatoskr:${APP_NAMESPACE}:app-url:${userId}`;
-}
-
-/**
  * Get server document ID from automerge URL.
  * Simple prefix, no mapping needed.
  */
@@ -66,63 +62,44 @@ function getServerId(automergeUrl) {
 }
 
 /**
- * Get server app document ID.
+ * Initialize the app's root document using the KV store.
+ *
+ * This uses client.getOrCreateAppDocument() which:
+ * 1. Checks server-side KV store for existing document URL
+ * 2. If found, returns existing document
+ * 3. If not found, creates new document and stores URL in KV store
  */
-function getAppServerId(automergeUrl) {
-  const hash = automergeUrl.replace("automerge:", "");
-  return `app:${APP_NAMESPACE}:${hash}`;
-}
-
 async function initializeAppDocument() {
   if (!currentUser) return;
 
-  // Check if we have a stored app document URL for this user
-  const storageKey = getAppDocKey(currentUser.id);
-  appDocUrl = localStorage.getItem(storageKey);
-
-  if (appDocUrl) {
-    try {
-      appDocHandle = await repo.find(appDocUrl);
-      await waitForHandle(appDocHandle);
-
-      const doc = getDocFromHandle(appDocHandle);
-      if (doc && doc.notes !== undefined) {
-        appDocHandle.on("change", () => renderDocumentList());
-        return;
-      }
-    } catch (err) {
-      console.warn("Could not load app document, creating new one:", err);
-      localStorage.removeItem(storageKey);
-    }
-  }
-
-  // Create new app document
-  appDocHandle = repo.create();
-  appDocUrl = appDocHandle.url;
-  const appAutomergeHash = appDocUrl.replace("automerge:", "");
-
-  // Store the URL for this user
-  localStorage.setItem(storageKey, appDocUrl);
-
-  // Register with server
   try {
-    await client.createDocument({
-      id: getAppServerId(appDocUrl),
-      automergeId: appAutomergeHash,
+    const result = await client.getOrCreateAppDocument(APP_NAMESPACE, {
+      key: "root",
       type: "app-index",
+      initialize: (doc) => {
+        doc.notes = [];
+        doc.settings = {};
+        doc.version = 1;
+      },
     });
+
+    appDocHandle = result.handle;
+    appDocUrl = result.url;
+
+    // Wait for document to be ready
+    await waitForHandle(appDocHandle);
+
+    appDocHandle.on("change", () => renderDocumentList());
+
+    if (result.isNew) {
+      console.log("Created new app document:", appDocUrl);
+    } else {
+      console.log("Loaded existing app document:", appDocUrl);
+    }
   } catch (err) {
-    console.warn("Could not register app document with server:", err);
+    console.error("Failed to initialize app document:", err);
+    showToast("Failed to load your documents", "error");
   }
-
-  // Initialize structure
-  appDocHandle.change((d) => {
-    d.notes = [];
-    d.settings = {};
-    d.version = 1;
-  });
-
-  appDocHandle.on("change", () => renderDocumentList());
 }
 
 // ============ Helper Functions ============

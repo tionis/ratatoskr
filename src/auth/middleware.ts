@@ -50,15 +50,14 @@ export function extractAuth(request: FastifyRequest): AuthContext | null {
 export async function requireAuth(
   request: FastifyRequest,
   reply: FastifyReply,
-): Promise<void> {
+): Promise<FastifyReply | void> {
   const auth = extractAuth(request);
 
   if (!auth) {
-    reply.code(401).send({
+    return reply.code(401).send({
       error: "unauthorized",
       message: "Authentication required",
     });
-    return;
   }
 
   request.auth = auth;

@@ -326,6 +326,91 @@ Revoke an API token.
 await client.deleteApiToken('token-id-here');
 ```
 
+#### KV Store
+
+The KV store provides simple per-user key-value storage, namespaced by application. This is useful for storing app configuration, document references, or other metadata.
+
+##### `kvGet(namespace, key): Promise<string | null>`
+
+Get a value from the KV store.
+
+```typescript
+const rootDocUrl = await client.kvGet('dev.myapp', 'root');
+if (rootDocUrl) {
+  const handle = repo.find(rootDocUrl);
+}
+```
+
+##### `kvSet(namespace, key, value): Promise<void>`
+
+Set a value in the KV store (max 64KB per value).
+
+```typescript
+await client.kvSet('dev.myapp', 'root', 'automerge:abc123');
+await client.kvSet('dev.myapp', 'settings', JSON.stringify({ theme: 'dark' }));
+```
+
+##### `kvDelete(namespace, key): Promise<boolean>`
+
+Delete a value. Returns `true` if deleted, `false` if not found.
+
+```typescript
+const deleted = await client.kvDelete('dev.myapp', 'oldKey');
+```
+
+##### `kvList(namespace): Promise<Array<{key, value, updatedAt}>>`
+
+List all entries in a namespace.
+
+```typescript
+const entries = await client.kvList('dev.myapp');
+for (const { key, value } of entries) {
+  console.log(`${key}: ${value}`);
+}
+```
+
+#### App Document Helper
+
+##### `getOrCreateAppDocument<T>(namespace, options?): Promise<{handle, url, isNew}>`
+
+Get or create a per-user root document for your application. This implements the recommended pattern for app state management:
+
+1. Check server-side KV store for existing document URL
+2. If found, return the existing document
+3. If not found, create a new document and store its URL
+
+```typescript
+// Get or create the app's root document
+const { handle, url, isNew } = await client.getOrCreateAppDocument('dev.myapp', {
+  key: 'root',           // KV key (default: 'root')
+  type: 'app-index',     // Document type for server registration
+  initialize: (doc) => { // Called only when creating new document
+    doc.notes = [];
+    doc.settings = { theme: 'light' };
+  }
+});
+
+// Wait for document to be ready
+await handle.whenReady();
+
+// Use the document
+const doc = handle.docSync();
+console.log('Notes:', doc.notes);
+
+// The URL persists across sessions via server-side KV store
+if (isNew) {
+  console.log('Created new app document');
+} else {
+  console.log('Loaded existing app document');
+}
+```
+
+This pattern ensures:
+- Each user gets their own private root document
+- Document URL is stored server-side (survives browser data clearing)
+- Subsequent calls return the same document
+- No need for localStorage management
+
 #### Offline-First Document Creation
 
 Documents can be created and edited offline. They'll be registered on the server when connectivity and authentication are restored.
@@ -617,6 +702,68 @@ const response = await fetch(`${process.env.RATATOSKR_URL}/api/v1/documents`, {
   }
 });
 ```
+
+### App State Management Pattern
+
+The recommended pattern for building apps with Ratatoskr uses a per-user root document to store app state and references to other documents:
+
+```typescript
+const APP_NAMESPACE = 'dev.mycompany.myapp';
+
+async function initializeApp() {
+  // 1. Login
+  if (!client.isAuthenticated()) {
+    await client.login();
+  }
+
+  // 2. Get the repo
+  const repo = client.getRepo();
+
+  // 3. Get or create the app's root document
+  const { handle: appDoc, isNew } = await client.getOrCreateAppDocument(APP_NAMESPACE, {
+    type: 'app-root',
+    initialize: (doc) => {
+      doc.notes = [];      // Array of note document URLs
+      doc.settings = {};   // App settings
+      doc.version = 1;     // Schema version for migrations
+    }
+  });
+
+  // 4. Wait for document to be ready
+  await appDoc.whenReady();
+
+  // 5. Listen for changes
+  appDoc.on('change', () => {
+    renderUI(appDoc.docSync());
+  });
+
+  // 6. Create related documents as needed
+  async function createNote(title) {
+    const noteHandle = repo.create();
+    noteHandle.change(doc => {
+      doc.title = title;
+      doc.content = '';
+      doc.createdAt = Date.now();
+    });
+
+    // Add reference to root document
+    appDoc.change(doc => {
+      doc.notes.push(noteHandle.url);
+    });
+
+    return noteHandle;
+  }
+
+  return { appDoc, createNote };
+}
+```
+
+This pattern provides:
+- **Per-user isolation**: Each user gets their own root document
+- **Server-side persistence**: Document URL stored in KV store (survives browser clearing)
+- **Offline support**: Documents work offline, sync when back online
+- **Collaboration**: Individual documents can be shared via ACLs
+- **Discoverability**: Root document contains references to all related documents
 
 ## Error Handling
 
