@@ -172,8 +172,9 @@ const BASE58_REGEX =
   /^[123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]+$/;
 
 function isValidAutomergeHash(hash) {
-  // Automerge document IDs are base58 encoded, typically 44-46 chars
-  return hash.length >= 40 && hash.length <= 50 && BASE58_REGEX.test(hash);
+  // Automerge document IDs are base58 encoded, variable length
+  // Minimum ~20 chars to reject obvious non-hashes like "test"
+  return hash.length >= 20 && BASE58_REGEX.test(hash);
 }
 
 function getDocFromHash() {
@@ -268,20 +269,32 @@ function formatBytes(bytes) {
 async function checkAuth() {
   const hashDoc = getDocFromHash();
 
-  // Check stored credentials synchronously first
+  // Check stored credentials and validate token
   if (client.hasStoredCredentials()) {
-    currentUser = client.getUser();
-    isViewerMode = false;
-    showMainApp();
-    repo = client.getRepo();
-    await initializeAppDocument();
-    renderDocumentList();
+    // Verify token is still valid with server
+    const isValid = await client.validateToken();
+    if (!isValid) {
+      console.warn("Stored token is invalid or expired, logging out");
+      client.logout();
+      // Fall through to show login or viewer mode
+    } else {
+      currentUser = client.getUser();
+      isViewerMode = false;
+      showMainApp();
+      repo = client.getRepo();
+      await initializeAppDocument();
+      renderDocumentList();
 
-    if (hashDoc) {
-      await openDocumentByUrl(hashDoc.url);
+      if (hashDoc) {
+        await openDocumentByUrl(hashDoc.url);
+      }
+      return;
     }
-  } else if (hashDoc) {
-    // Not logged in, but there's a document to view
+  }
+
+  // Not authenticated or token was invalid
+  if (hashDoc) {
+    // There's a document to view
     isViewerMode = true;
     await showViewerMode(hashDoc);
   } else {
