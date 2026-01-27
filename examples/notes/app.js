@@ -167,16 +167,35 @@ async function waitForHandle(handle, timeoutMs = 5000) {
 
 // ============ URL Hash Routing ============
 
+// Base58 characters (Bitcoin alphabet)
+const BASE58_REGEX =
+  /^[123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]+$/;
+
+function isValidAutomergeHash(hash) {
+  // Automerge document IDs are base58 encoded, typically 44-46 chars
+  return hash.length >= 40 && hash.length <= 50 && BASE58_REGEX.test(hash);
+}
+
 function getDocFromHash() {
   const hash = window.location.hash.slice(1);
   if (!hash) return null;
 
   // Full automerge URL
   if (hash.startsWith("automerge:")) {
+    const docHash = hash.slice("automerge:".length);
+    if (!isValidAutomergeHash(docHash)) {
+      console.warn("Invalid automerge hash in URL:", hash);
+      return null;
+    }
     return { url: hash };
   }
 
-  // Just the hash part
+  // Just the hash part - validate it
+  if (!isValidAutomergeHash(hash)) {
+    console.warn("Invalid automerge hash in URL:", hash);
+    return null;
+  }
+
   return { url: `automerge:${hash}` };
 }
 
