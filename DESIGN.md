@@ -376,21 +376,29 @@ Created ──► Active (peers connected) ──► Idle (no peers) ──► D
 
 ### Architecture
 
+The storage layer uses a dual-database architecture:
+
 ```
-┌─────────────────────────────────────────────────────────┐
-│                      Storage Layer                       │
-├─────────────────────────┬───────────────────────────────┤
-│        SQLite           │         Filesystem            │
-├─────────────────────────┼───────────────────────────────┤
-│ • User accounts         │ • Automerge document blobs    │
-│ • Document metadata     │ • Organized by document ID    │
-│ • ACLs                  │                               │
-│ • API tokens            │                               │
-│ • Rate limit state      │                               │
-└─────────────────────────┴───────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│                         Storage Layer                                │
+├──────────────────────────┬──────────────────┬───────────────────────┤
+│    ratatoskr.db          │   automerge.db   │     Filesystem        │
+│    (SQLite)              │   (SQLite)       │                       │
+├──────────────────────────┼──────────────────┼───────────────────────┤
+│ • User accounts          │ • Automerge      │ • Document blobs      │
+│ • Document metadata      │   chunks         │   (sharded by ID)     │
+│ • ACLs                   │   (key-value)    │ • Blob storage        │
+│ • API tokens             │                  │   (sharded by hash)   │
+│ • KV store               │                  │                       │
+│ • Blob claims            │                  │                       │
+└──────────────────────────┴──────────────────┴───────────────────────┘
 ```
 
-### SQLite Schema
+**Why dual databases?**
+- `ratatoskr.db`: Application metadata with relational integrity
+- `automerge.db`: High-frequency chunk storage for automerge-repo (avoids inode exhaustion)
+
+### SQLite Schema (ratatoskr.db)
 
 ```sql
 -- Users (cached from OIDC)
@@ -401,6 +409,8 @@ CREATE TABLE users (
   quota_max_documents INTEGER DEFAULT 10000,
   quota_max_document_size INTEGER DEFAULT 10485760,
   quota_max_total_storage INTEGER DEFAULT 1073741824,
+  quota_max_blob_storage INTEGER DEFAULT 5368709120,   -- 5 GB for blobs
+  quota_max_blob_size INTEGER DEFAULT 1073741824,      -- 1 GB max blob
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -410,7 +420,7 @@ CREATE TABLE api_tokens (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id),
   name TEXT NOT NULL,
-  token_hash TEXT NOT NULL,      -- bcrypt hash
+  token_hash TEXT NOT NULL,      -- SHA-256 hash
   scopes TEXT,                   -- JSON array of scopes
   last_used_at TEXT,
   expires_at TEXT,
@@ -421,6 +431,7 @@ CREATE TABLE api_tokens (
 CREATE TABLE documents (
   id TEXT PRIMARY KEY,           -- "doc:uuid" or "app:app-id"
   owner_id TEXT NOT NULL REFERENCES users(id),
+  automerge_id TEXT,             -- Raw automerge-repo document ID
   type TEXT,                     -- Optional type identifier (max 200 chars)
   size INTEGER DEFAULT 0,
   expires_at TEXT,
@@ -437,10 +448,33 @@ CREATE TABLE acl_entries (
   UNIQUE(document_id, principal)
 );
 
+-- KV store (per-user namespaced storage)
+CREATE TABLE kv_store (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  namespace TEXT NOT NULL,
+  key TEXT NOT NULL,
+  value TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (user_id, namespace, key)
+);
+
 -- Indexes
 CREATE INDEX idx_documents_owner ON documents(owner_id);
+CREATE INDEX idx_documents_automerge ON documents(automerge_id) WHERE automerge_id IS NOT NULL;
 CREATE INDEX idx_acl_principal ON acl_entries(principal);
 CREATE INDEX idx_documents_expires ON documents(expires_at) WHERE expires_at IS NOT NULL;
+CREATE INDEX idx_kv_namespace ON kv_store(user_id, namespace);
+```
+
+### SQLite Schema (automerge.db)
+
+```sql
+-- Automerge document chunks (used by SqliteStorageAdapter)
+CREATE TABLE chunks (
+  key TEXT PRIMARY KEY,          -- Normalized storage key (docId + chunkHash)
+  data BLOB NOT NULL
+);
 ```
 
 ### Filesystem Structure
@@ -450,12 +484,21 @@ data/
 ├── documents/
 │   ├── doc/
 │   │   ├── ab/
-│   │   │   └── ab12cd34-...    # Automerge binary
+│   │   │   └── ab12cd34-...    # Automerge binary blob
 │   │   └── ...
 │   └── app/
-│       └── {user-id}/
-│           └── {app-id}        # Per-user-per-app documents
-└── ratatoskr.db                # SQLite database
+│       └── {app-id}            # Per-user-per-app documents
+├── blobs/                       # Content-addressable blob storage
+│   ├── ab/
+│   │   └── ab12cd34ef...       # Full SHA-256 hash as filename
+│   └── ...
+├── blob-chunks/                 # Temporary chunked upload storage
+│   └── {upload-id}/
+│       ├── 0
+│       ├── 1
+│       └── ...
+├── ratatoskr.db                 # Application metadata
+└── automerge.db                 # Automerge chunks
 ```
 
 ### Backup Strategy
@@ -752,52 +795,63 @@ data/
 
 #### Database Schema
 
+These tables are added to `ratatoskr.db` via migrations:
+
 ```sql
 -- Blobs (one row per unique content)
-CREATE TABLE blobs (
-  hash TEXT PRIMARY KEY,           -- SHA-256 hex
+CREATE TABLE IF NOT EXISTS blobs (
+  hash TEXT PRIMARY KEY,           -- SHA-256 hex (64 chars)
   size INTEGER NOT NULL,           -- Bytes
   mime_type TEXT NOT NULL,         -- Content-Type
-  created_at TEXT NOT NULL,        -- First upload timestamp
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
   released_at TEXT                 -- When claimers became 0 (NULL if claimed)
 );
-CREATE INDEX idx_blobs_released ON blobs(released_at)
+CREATE INDEX IF NOT EXISTS idx_blobs_released ON blobs(released_at)
   WHERE released_at IS NOT NULL;
 
 -- User blob claims (many-to-many: users ↔ blobs)
-CREATE TABLE blob_claims (
+CREATE TABLE IF NOT EXISTS blob_claims (
   blob_hash TEXT NOT NULL REFERENCES blobs(hash) ON DELETE CASCADE,
-  user_id TEXT NOT NULL REFERENCES users(id),
-  claimed_at TEXT NOT NULL,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  claimed_at TEXT NOT NULL DEFAULT (datetime('now')),
   PRIMARY KEY (blob_hash, user_id)
 );
-CREATE INDEX idx_blob_claims_user ON blob_claims(user_id);
+CREATE INDEX IF NOT EXISTS idx_blob_claims_user ON blob_claims(user_id);
 
 -- Document blob claims (many-to-many: documents ↔ blobs)
 -- Quota is charged to the document owner
-CREATE TABLE document_blob_claims (
+CREATE TABLE IF NOT EXISTS document_blob_claims (
   blob_hash TEXT NOT NULL REFERENCES blobs(hash) ON DELETE CASCADE,
   document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
   owner_id TEXT NOT NULL REFERENCES users(id),  -- Denormalized for quota queries
-  claimed_at TEXT NOT NULL,
+  claimed_at TEXT NOT NULL DEFAULT (datetime('now')),
   PRIMARY KEY (blob_hash, document_id)
 );
-CREATE INDEX idx_document_blob_claims_owner ON document_blob_claims(owner_id);
-CREATE INDEX idx_document_blob_claims_document ON document_blob_claims(document_id);
+CREATE INDEX IF NOT EXISTS idx_document_blob_claims_owner ON document_blob_claims(owner_id);
+CREATE INDEX IF NOT EXISTS idx_document_blob_claims_document ON document_blob_claims(document_id);
 
 -- Chunked uploads (in-progress uploads)
-CREATE TABLE blob_uploads (
-  id TEXT PRIMARY KEY,             -- Upload session ID
-  user_id TEXT NOT NULL REFERENCES users(id),
+CREATE TABLE IF NOT EXISTS blob_uploads (
+  id TEXT PRIMARY KEY,             -- Upload session ID (UUID)
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   expected_hash TEXT,              -- Client-provided expected hash (optional)
-  expected_size INTEGER NOT NULL,  -- Total expected size
+  expected_size INTEGER NOT NULL,  -- Total expected size in bytes
   mime_type TEXT NOT NULL,
   chunk_size INTEGER NOT NULL,     -- Size of each chunk (except last)
   chunks_received INTEGER DEFAULT 0,
   total_chunks INTEGER NOT NULL,
-  created_at TEXT NOT NULL,
-  expires_at TEXT NOT NULL         -- Auto-cleanup stale uploads
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  expires_at TEXT NOT NULL         -- Auto-cleanup stale uploads (24h)
 );
+CREATE INDEX IF NOT EXISTS idx_blob_uploads_user ON blob_uploads(user_id);
+CREATE INDEX IF NOT EXISTS idx_blob_uploads_expires ON blob_uploads(expires_at);
+```
+
+**User quota migration** (adds blob quota columns to existing users table):
+
+```sql
+ALTER TABLE users ADD COLUMN quota_max_blob_storage INTEGER DEFAULT 5368709120;  -- 5 GB
+ALTER TABLE users ADD COLUMN quota_max_blob_size INTEGER DEFAULT 1073741824;     -- 1 GB
 ```
 
 ### REST API
