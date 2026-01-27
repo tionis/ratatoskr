@@ -1,12 +1,11 @@
 // Ratatoskr Notes - Collaborative Document Editor Example
 //
 // Document namespace: dev.tionis.notes
-// - app:dev.tionis.notes - Index document tracking all notes
-// - doc:dev.tionis.notes-{id} - Individual note documents
+// - app:dev.tionis.notes - User's index document (server routes to user-specific version)
+// - doc:dev.tionis.notes:{hash} - Individual note documents
 
 const SERVER_URL = "http://localhost:4151";
 const APP_NAMESPACE = "dev.tionis.notes";
-const APP_DOC_URL_KEY = `ratatoskr:${APP_NAMESPACE}:app-url`;
 
 // Client and repo
 let RatatoskrClient;
@@ -17,16 +16,16 @@ let repo;
 let appDocHandle = null;
 let appDocUrl = null;
 let currentUser = null;
-let currentDocId = null; // automerge URL
-let currentServerId = null; // server document ID for ACL operations
+let currentDocUrl = null; // automerge URL - this IS the document ID
 let currentDocHandle = null;
 let currentAcl = [];
 let isOwner = false;
 let pendingConfirmCallback = null;
-let isViewerMode = false; // True when viewing without full auth
+let isViewerMode = false;
 
 // DOM Elements
 const loginScreen = document.getElementById("login-screen");
+const loadingScreen = document.getElementById("loading-screen");
 const mainApp = document.getElementById("main-app");
 const welcomeView = document.getElementById("welcome-view");
 const editorView = document.getElementById("editor-view");
@@ -50,90 +49,95 @@ async function initializeClient() {
   }
 }
 
+/**
+ * Get the localStorage key for app document URL, scoped by user ID.
+ */
+function getAppDocKey(userId) {
+  return `ratatoskr:${APP_NAMESPACE}:app-url:${userId}`;
+}
+
+/**
+ * Get server document ID from automerge URL.
+ * Simple prefix, no mapping needed.
+ */
+function getServerId(automergeUrl) {
+  const hash = automergeUrl.replace("automerge:", "");
+  return `doc:${APP_NAMESPACE}:${hash}`;
+}
+
+/**
+ * Get server app document ID.
+ */
+function getAppServerId(automergeUrl) {
+  const hash = automergeUrl.replace("automerge:", "");
+  return `app:${APP_NAMESPACE}:${hash}`;
+}
+
 async function initializeAppDocument() {
-  // Check if we have a stored app document URL
-  appDocUrl = localStorage.getItem(APP_DOC_URL_KEY);
+  if (!currentUser) return;
+
+  // Check if we have a stored app document URL for this user
+  const storageKey = getAppDocKey(currentUser.id);
+  appDocUrl = localStorage.getItem(storageKey);
 
   if (appDocUrl) {
-    // Try to find existing app document
     try {
-      // repo.find() returns a Promise in newer automerge-repo versions
       appDocHandle = await repo.find(appDocUrl);
       await waitForHandle(appDocHandle);
 
       const doc = getDocFromHandle(appDocHandle);
-      if (doc && Object.keys(doc).length > 0) {
-        // Found existing document
+      if (doc && doc.notes !== undefined) {
         appDocHandle.on("change", () => renderDocumentList());
         return;
       }
     } catch (err) {
       console.warn("Could not load app document, creating new one:", err);
-      // Clear invalid URL from storage
-      localStorage.removeItem(APP_DOC_URL_KEY);
+      localStorage.removeItem(storageKey);
     }
   }
 
   // Create new app document
   appDocHandle = repo.create();
   appDocUrl = appDocHandle.url;
+  const appAutomergeHash = appDocUrl.replace("automerge:", "");
 
-  // Store the URL for later
-  localStorage.setItem(APP_DOC_URL_KEY, appDocUrl);
+  // Store the URL for this user
+  localStorage.setItem(storageKey, appDocUrl);
 
-  // Register with server FIRST (before .change() triggers sync)
-  const appAutomergeId = appDocUrl.replace("automerge:", "");
+  // Register with server
   try {
     await client.createDocument({
-      id: `app:${APP_NAMESPACE}-${appAutomergeId}`,
-      automergeId: appAutomergeId,
+      id: getAppServerId(appDocUrl),
+      automergeId: appAutomergeHash,
       type: "app-index",
     });
   } catch (err) {
-    // May fail if offline, that's ok - will sync later
     console.warn("Could not register app document with server:", err);
   }
 
-  // THEN initialize structure (this triggers sync)
+  // Initialize structure
   appDocHandle.change((d) => {
-    d.notes = []; // Array of { id, title, createdAt, updatedAt }
+    d.notes = [];
     d.settings = {};
     d.version = 1;
   });
 
-  // Listen for changes
   appDocHandle.on("change", () => renderDocumentList());
 }
 
 // ============ Helper Functions ============
 
-/**
- * Get document from handle, trying different API methods.
- */
 function getDocFromHandle(handle) {
-  if (typeof handle.doc === "function") {
-    return handle.doc();
-  }
-  if (typeof handle.docSync === "function") {
-    return handle.docSync();
-  }
-  // Maybe it's a property, not a method
-  if (handle.doc !== undefined && typeof handle.doc !== "function") {
+  if (typeof handle.doc === "function") return handle.doc();
+  if (typeof handle.docSync === "function") return handle.docSync();
+  if (handle.doc !== undefined && typeof handle.doc !== "function")
     return handle.doc;
-  }
   return undefined;
 }
 
-/**
- * Wait for a document handle to be ready.
- * Works with different automerge-repo versions.
- */
 async function waitForHandle(handle, timeoutMs = 5000) {
-  if (!handle) {
-    throw new Error("Invalid handle: null or undefined");
-  }
+  if (!handle) throw new Error("Invalid handle");
 
-  // If handle has whenReady method, use it
   if (typeof handle.whenReady === "function") {
     try {
       await handle.whenReady(["ready", "unavailable"]);
@@ -143,18 +147,13 @@ async function waitForHandle(handle, timeoutMs = 5000) {
     }
   }
 
-  // Fallback: poll until doc returns something or timeout
   const startTime = Date.now();
   return new Promise((resolve, reject) => {
     const check = () => {
-      try {
-        const doc = getDocFromHandle(handle);
-        if (doc !== undefined) {
-          resolve();
-          return;
-        }
-      } catch (err) {
-        console.warn("getDocFromHandle error:", err);
+      const doc = getDocFromHandle(handle);
+      if (doc !== undefined) {
+        resolve();
+        return;
       }
       if (Date.now() - startTime > timeoutMs) {
         reject(new Error("Timeout waiting for document"));
@@ -168,50 +167,26 @@ async function waitForHandle(handle, timeoutMs = 5000) {
 
 // ============ URL Hash Routing ============
 
-/**
- * Get document info from URL hash.
- * Supports formats:
- * - #noteId (short note ID from local index)
- * - #automerge:hash (full automerge URL)
- * - #hash (just the automerge hash)
- */
 function getDocFromHash() {
-  const hash = window.location.hash.slice(1); // Remove #
+  const hash = window.location.hash.slice(1);
   if (!hash) return null;
 
   // Full automerge URL
   if (hash.startsWith("automerge:")) {
-    return { type: "automerge", url: hash };
+    return { url: hash };
   }
 
-  // Check if it's a note ID from our index
-  const notes = getNotesFromAppDoc();
-  const note = notes.find((n) => n.id === hash);
-  if (note) {
-    return { type: "note", note };
-  }
-
-  // Assume it's an automerge hash
-  return { type: "automerge", url: `automerge:${hash}` };
+  // Just the hash part
+  return { url: `automerge:${hash}` };
 }
 
-/**
- * Update URL hash when opening a document.
- * Uses the short note ID if available, otherwise the automerge hash.
- */
-function setDocHash(noteInfo, automergeUrl) {
-  if (noteInfo?.id) {
-    window.location.hash = noteInfo.id;
-  } else if (automergeUrl) {
-    // Use just the hash part for cleaner URLs
+function setDocHash(automergeUrl) {
+  if (automergeUrl) {
     const hash = automergeUrl.replace("automerge:", "");
     window.location.hash = hash;
   }
 }
 
-/**
- * Clear the URL hash.
- */
 function clearDocHash() {
   history.pushState(
     null,
@@ -220,13 +195,9 @@ function clearDocHash() {
   );
 }
 
-/**
- * Get a shareable link for the current document.
- * Uses the automerge hash for maximum compatibility.
- */
 function getShareableLink() {
-  if (!currentDocId) return null;
-  const hash = currentDocId.replace("automerge:", "");
+  if (!currentDocUrl) return null;
+  const hash = currentDocUrl.replace("automerge:", "");
   return `${window.location.origin}${window.location.pathname}#${hash}`;
 }
 
@@ -273,16 +244,13 @@ function formatBytes(bytes) {
   return `${parseFloat((bytes / k ** i).toFixed(2))} ${sizes[i]}`;
 }
 
-function generateNoteId() {
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
-}
-
 // ============ Authentication ============
 
 async function checkAuth() {
   const hashDoc = getDocFromHash();
 
-  if (client.isAuthenticated()) {
+  // Check stored credentials synchronously first
+  if (client.hasStoredCredentials()) {
     currentUser = client.getUser();
     isViewerMode = false;
     showMainApp();
@@ -290,38 +258,33 @@ async function checkAuth() {
     await initializeAppDocument();
     renderDocumentList();
 
-    // If there's a document in the URL, try to open it
     if (hashDoc) {
-      await openDocFromHash(hashDoc);
+      await openDocumentByUrl(hashDoc.url);
     }
   } else if (hashDoc) {
     // Not logged in, but there's a document to view
-    // Show viewer mode
     isViewerMode = true;
-    showViewerMode(hashDoc);
+    await showViewerMode(hashDoc);
   } else {
     showLogin();
   }
 }
 
-/**
- * Handle opening a document from URL hash info.
- */
-async function openDocFromHash(hashDoc) {
-  if (hashDoc.type === "note" && hashDoc.note) {
-    await openDocumentByUrl(hashDoc.note.url, hashDoc.note);
-  } else if (hashDoc.type === "automerge" && hashDoc.url) {
-    await openDocumentByUrl(hashDoc.url);
-  }
+function showLoading() {
+  loadingScreen?.classList.remove("hidden");
+  loginScreen.classList.add("hidden");
+  mainApp.classList.add("hidden");
 }
 
 function showLogin() {
   loginScreen.classList.remove("hidden");
+  loadingScreen?.classList.add("hidden");
   mainApp.classList.add("hidden");
 }
 
 function showMainApp() {
   loginScreen.classList.add("hidden");
+  loadingScreen?.classList.add("hidden");
   mainApp.classList.remove("hidden");
 
   if (isViewerMode) {
@@ -334,13 +297,9 @@ function showMainApp() {
   }
 }
 
-/**
- * Show the app in viewer mode for unauthenticated users viewing a shared document.
- */
 async function showViewerMode(hashDoc) {
   showMainApp();
 
-  // Hide elements that require authentication
   document.getElementById("new-doc-btn").style.display = "none";
   document.getElementById("refresh-docs-btn").style.display = "none";
   document.getElementById("settings-btn").style.display = "none";
@@ -348,23 +307,16 @@ async function showViewerMode(hashDoc) {
     '<div class="empty-state-small">Sign in to see your documents</div>';
   document.getElementById("shared-docs-list").innerHTML = "";
 
-  // Show login prompt in sidebar footer
   const footer = document.querySelector(".sidebar-footer .user-menu");
-  footer.innerHTML = `
-    <button id="viewer-login-btn" class="btn btn-primary btn-small">Sign In</button>
-  `;
+  footer.innerHTML = `<button id="viewer-login-btn" class="btn btn-primary btn-small">Sign In</button>`;
   document
     .getElementById("viewer-login-btn")
     .addEventListener("click", handleLogin);
 
-  // Try to open the document anonymously
-  // This will work for public documents
   try {
-    // Get repo - will connect anonymously since no token is set
     repo = client.getRepo();
-
-    if (hashDoc.type === "automerge" && hashDoc.url) {
-      await openDocumentByUrl(hashDoc.url, null, { readOnly: true });
+    if (hashDoc?.url) {
+      await openDocumentByUrl(hashDoc.url, { readOnly: true });
     }
   } catch (err) {
     console.error("Failed to open document in viewer mode:", err);
@@ -372,13 +324,8 @@ async function showViewerMode(hashDoc) {
   }
 }
 
-/**
- * Show login prompt when document requires authentication.
- */
 function showViewerLoginPrompt() {
   showToast("Sign in to view this document", "info");
-
-  // Show login prompt in the main area
   welcomeView.classList.remove("hidden");
   editorView.classList.add("hidden");
   document.querySelector(".welcome-content h2").textContent = "Sign in to view";
@@ -389,20 +336,18 @@ function showViewerLoginPrompt() {
 }
 
 async function handleLogin() {
-  // Remember if we were viewing a document before login
-  const wasViewingDoc = isViewerMode && currentDocId;
-  const docToReopen = currentDocId;
+  const wasViewingDoc = isViewerMode && currentDocUrl;
+  const docToReopen = currentDocUrl;
 
   try {
     currentUser = await client.login();
     isViewerMode = false;
 
-    // Reset UI elements that were hidden in viewer mode
+    // Reset UI
     document.getElementById("new-doc-btn").style.display = "";
     document.getElementById("refresh-docs-btn").style.display = "";
     document.getElementById("settings-btn").style.display = "";
 
-    // Reset welcome view content
     document.querySelector(".welcome-content h2").textContent =
       "Welcome to Ratatoskr Notes";
     document.querySelector(".welcome-content p").textContent =
@@ -439,7 +384,6 @@ async function handleLogin() {
     await initializeAppDocument();
     renderDocumentList();
 
-    // If we were viewing a document, reopen it with full permissions
     if (wasViewingDoc && docToReopen) {
       closeDocument();
       await openDocumentByUrl(docToReopen);
@@ -456,6 +400,7 @@ function handleLogout() {
   currentUser = null;
   repo = null;
   appDocHandle = null;
+  appDocUrl = null;
   closeDocument();
   showLogin();
   showToast("Logged out", "info");
@@ -481,9 +426,9 @@ function renderDocumentList() {
   } else {
     ownedList.innerHTML = notes
       .map((note) => {
-        const isActive = note.url === currentDocId;
+        const isActive = note.url === currentDocUrl;
         return `
-          <div class="doc-item ${isActive ? "active" : ""}" data-id="${escapeHtml(note.id)}">
+          <div class="doc-item ${isActive ? "active" : ""}" data-url="${escapeHtml(note.url)}">
             <div class="doc-item-icon">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
@@ -500,13 +445,11 @@ function renderDocumentList() {
       })
       .join("");
 
-    // Add click handlers
     ownedList.querySelectorAll(".doc-item").forEach((item) => {
-      item.addEventListener("click", () => openDocument(item.dataset.id));
+      item.addEventListener("click", () => openDocumentByUrl(item.dataset.url));
     });
   }
 
-  // For now, shared list shows hint about using ACLs
   sharedList.innerHTML =
     '<div class="empty-state-small">Share documents via ACL settings</div>';
 }
@@ -514,27 +457,24 @@ function renderDocumentList() {
 // ============ Document Operations ============
 
 async function createDocument(title) {
-  const noteId = generateNoteId();
-
   try {
-    // Create local automerge document
     const handle = repo.create();
     const docUrl = handle.url;
-    const automergeId = docUrl.replace("automerge:", "");
-    const serverId = `doc:${APP_NAMESPACE}-${automergeId}`;
+    const automergeHash = docUrl.replace("automerge:", "");
+    const serverId = getServerId(docUrl);
 
-    // Register with server FIRST (before .change() triggers sync)
+    // Register with server first
     try {
       await client.createDocument({
         id: serverId,
-        automergeId: automergeId,
+        automergeId: automergeHash,
         type: "note",
       });
     } catch (err) {
       console.warn("Could not register document with server:", err);
     }
 
-    // THEN initialize document content (this triggers sync)
+    // Initialize content
     handle.change((doc) => {
       doc.title = title || "Untitled";
       doc.content = "";
@@ -542,13 +482,11 @@ async function createDocument(title) {
       doc.updatedAt = new Date().toISOString();
     });
 
-    // Add to app index (store the automerge URL)
+    // Add to app index
     appDocHandle.change((appDoc) => {
       if (!appDoc.notes) appDoc.notes = [];
       appDoc.notes.unshift({
-        id: noteId,
         url: docUrl,
-        serverId: serverId,
         title: title || "Untitled",
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -563,62 +501,45 @@ async function createDocument(title) {
   }
 }
 
-function openDocument(noteId) {
-  // Find the note in the app index to get its URL
-  const notes = getNotesFromAppDoc();
-  const note = notes.find((n) => n.id === noteId);
-  if (!note || !note.url) {
-    showToast("Document not found", "error");
-    return;
-  }
-  openDocumentByUrl(note.url, note);
-}
-
-async function openDocumentByUrl(docUrl, noteInfo = null, options = {}) {
+async function openDocumentByUrl(docUrl, options = {}) {
   const { readOnly = false } = options;
 
-  // Close previous document if open
   if (currentDocHandle) {
     currentDocHandle.off("change", handleDocumentChange);
   }
 
-  // Find note info if not provided (only if authenticated)
-  if (!noteInfo && !isViewerMode) {
-    const notes = getNotesFromAppDoc();
-    noteInfo = notes.find((n) => n.url === docUrl);
-  }
+  // Find note info from our index
+  const notes = getNotesFromAppDoc();
+  const noteInfo = notes.find((n) => n.url === docUrl);
 
-  currentDocId = docUrl;
-  currentServerId = noteInfo?.serverId || null;
+  currentDocUrl = docUrl;
 
-  // Determine ownership - only owner if authenticated and it's our doc
-  isOwner = !isViewerMode && !readOnly && !!noteInfo;
+  // Owner if it's in our index (we created it)
+  isOwner = !isViewerMode && !!noteInfo;
 
-  // Update URL hash
-  setDocHash(noteInfo, docUrl);
+  setDocHash(docUrl);
 
-  // Update UI
   welcomeView.classList.add("hidden");
   editorView.classList.remove("hidden");
 
-  // Update sidebar active state (only if not in viewer mode)
+  // Update sidebar
   if (!isViewerMode) {
     document.querySelectorAll(".doc-item").forEach((item) => {
-      const notes = getNotesFromAppDoc();
-      const note = notes.find((n) => n.id === item.dataset.id);
-      item.classList.toggle("active", note?.url === docUrl);
+      item.classList.toggle("active", item.dataset.url === docUrl);
     });
   }
 
-  // Show/hide owner buttons based on ownership
+  // Show/hide owner buttons
   document.getElementById("share-btn").style.display = isOwner ? "" : "none";
   document.getElementById("delete-doc-btn").style.display = isOwner
     ? ""
     : "none";
 
-  // Handle read-only mode
+  // Handle read-only mode (only in viewer mode)
   const titleInput = document.getElementById("doc-title-input");
-  if (readOnly || isViewerMode) {
+  const shouldBeReadOnly = readOnly || isViewerMode;
+
+  if (shouldBeReadOnly) {
     editor.setAttribute("readonly", "true");
     titleInput.setAttribute("readonly", "true");
     editor.classList.add("readonly");
@@ -633,26 +554,16 @@ async function openDocumentByUrl(docUrl, noteInfo = null, options = {}) {
   setSyncStatus("syncing");
 
   try {
-    // Get document handle (repo.find returns a Promise)
     currentDocHandle = await repo.find(docUrl);
+    await waitForHandle(currentDocHandle, isViewerMode ? 10000 : 5000);
 
-    // Set up a timeout for viewer mode - document may not be accessible
-    const loadPromise = waitForHandle(
-      currentDocHandle,
-      isViewerMode ? 10000 : 5000,
-    );
-
-    await loadPromise;
-
-    // Load content
     const doc = getDocFromHandle(currentDocHandle);
     if (!doc) {
       if (isViewerMode) {
-        // In viewer mode, show login prompt if document isn't accessible
         showViewerLoginPrompt();
         return;
       }
-      showToast("Document unavailable - may need to sync", "error");
+      showToast("Document unavailable", "error");
       setSyncStatus("error");
       currentDocHandle = null;
       return;
@@ -662,13 +573,10 @@ async function openDocumentByUrl(docUrl, noteInfo = null, options = {}) {
     editor.value = doc.content || "";
     updateCharCount();
 
-    // Listen for remote changes
     currentDocHandle.on("change", handleDocumentChange);
-
     setSyncStatus("synced");
   } catch (err) {
     if (isViewerMode) {
-      // In viewer mode, show login prompt for any error
       showViewerLoginPrompt();
       return;
     }
@@ -685,9 +593,7 @@ function handleDocumentChange({ doc }) {
   if (newContent !== currentContent) {
     const selStart = editor.selectionStart;
     const selEnd = editor.selectionEnd;
-
     editor.value = newContent;
-
     editor.selectionStart = Math.min(selStart, newContent.length);
     editor.selectionEnd = Math.min(selEnd, newContent.length);
   }
@@ -706,16 +612,13 @@ function closeDocument() {
     currentDocHandle.off("change", handleDocumentChange);
     currentDocHandle = null;
   }
-  currentDocId = null;
-  currentServerId = null;
+  currentDocUrl = null;
 
-  // Clear URL hash
   clearDocHash();
 
   welcomeView.classList.remove("hidden");
   editorView.classList.add("hidden");
 
-  // Reset readonly state
   editor.removeAttribute("readonly");
   document.getElementById("doc-title-input").removeAttribute("readonly");
   editor.classList.remove("readonly");
@@ -726,9 +629,9 @@ function closeDocument() {
   });
 }
 
-async function deleteDocument(noteId) {
+async function deleteDocument(docUrl) {
   const notes = getNotesFromAppDoc();
-  const note = notes.find((n) => n.id === noteId);
+  const note = notes.find((n) => n.url === docUrl);
 
   if (!note) {
     showToast("Document not found", "error");
@@ -736,28 +639,23 @@ async function deleteDocument(noteId) {
   }
 
   try {
-    // Try to delete from server if we have a server ID
-    if (note.serverId) {
-      try {
-        await client.deleteDocument(note.serverId);
-      } catch (err) {
-        console.warn("Could not delete from server:", err);
-      }
+    const serverId = getServerId(docUrl);
+    try {
+      await client.deleteDocument(serverId);
+    } catch (err) {
+      console.warn("Could not delete from server:", err);
     }
 
-    // Remove from app index
     appDocHandle.change((appDoc) => {
       if (appDoc.notes) {
-        const idx = appDoc.notes.findIndex((n) => n.id === noteId);
-        if (idx >= 0) {
-          appDoc.notes.splice(idx, 1);
-        }
+        const idx = appDoc.notes.findIndex((n) => n.url === docUrl);
+        if (idx >= 0) appDoc.notes.splice(idx, 1);
       }
     });
 
     showToast("Document deleted", "success");
 
-    if (currentDocId === note.url) {
+    if (currentDocUrl === docUrl) {
       closeDocument();
     }
     renderDocumentList();
@@ -780,15 +678,14 @@ function handleEditorInput() {
   saveTimeout = setTimeout(() => {
     if (!currentDocHandle || typeof currentDocHandle.change !== "function")
       return;
+
     const content = editor.value;
     currentDocHandle.change((doc) => {
       doc.content = content;
       doc.updatedAt = new Date().toISOString();
     });
 
-    // Update app index with timestamp
     updateNoteInIndex({ updatedAt: new Date().toISOString() });
-
     setSyncStatus("synced");
   }, 300);
 
@@ -805,20 +702,17 @@ function handleTitleChange() {
     doc.updatedAt = new Date().toISOString();
   });
 
-  // Update app index
   updateNoteInIndex({ title, updatedAt: new Date().toISOString() });
   renderDocumentList();
 }
 
 function updateNoteInIndex(updates) {
-  if (!appDocHandle || !currentDocId) return;
+  if (!appDocHandle || !currentDocUrl) return;
 
   appDocHandle.change((appDoc) => {
     if (!appDoc.notes) return;
-    const note = appDoc.notes.find((n) => n.url === currentDocId);
-    if (note) {
-      Object.assign(note, updates);
-    }
+    const note = appDoc.notes.find((n) => n.url === currentDocUrl);
+    if (note) Object.assign(note, updates);
   });
 }
 
@@ -853,17 +747,17 @@ function setSyncStatus(status) {
 // ============ Sharing / ACL ============
 
 async function openShareModal() {
-  if (!currentDocId || !isOwner || !currentServerId) {
-    showToast("Cannot share: document not registered with server", "error");
+  if (!currentDocUrl || !isOwner) {
+    showToast("Cannot share this document", "error");
     return;
   }
+
+  const serverId = getServerId(currentDocUrl);
 
   document.getElementById("share-doc-title").textContent =
     document.getElementById("doc-title-input").value || "Untitled";
 
-  // Populate shareable link
-  const shareLink = getShareableLink();
-  document.getElementById("share-link-input").value = shareLink || "";
+  document.getElementById("share-link-input").value = getShareableLink() || "";
 
   openModal("share-modal");
 
@@ -871,7 +765,7 @@ async function openShareModal() {
   shareList.innerHTML = '<div class="loading-small">Loading...</div>';
 
   try {
-    const acl = await client.getDocumentACL(currentServerId);
+    const acl = await client.getDocumentACL(serverId);
     currentAcl = acl || [];
     renderShareList();
   } catch (_err) {
@@ -918,9 +812,7 @@ function renderShareList() {
       const aclIdx = currentAcl.findIndex(
         (item) => item.principal === entry.principal,
       );
-      if (aclIdx >= 0) {
-        currentAcl[aclIdx].permission = e.target.value;
-      }
+      if (aclIdx >= 0) currentAcl[aclIdx].permission = e.target.value;
     });
   });
 
@@ -956,15 +848,15 @@ function addShareEntry() {
 function handlePublicToggle() {
   const isPublic = document.getElementById("public-read-toggle").checked;
   currentAcl = currentAcl.filter((e) => e.principal !== "public");
-
   if (isPublic) {
     currentAcl.push({ principal: "public", permission: "read" });
   }
 }
 
 async function saveShareSettings() {
+  const serverId = getServerId(currentDocUrl);
   try {
-    await client.setDocumentACL(currentServerId, currentAcl);
+    await client.setDocumentACL(serverId, currentAcl);
     closeModal("share-modal");
     showToast("Sharing settings saved", "success");
   } catch (err) {
@@ -1050,9 +942,8 @@ async function loadTokens() {
 
     container.querySelectorAll(".delete-token-btn").forEach((btn) => {
       btn.addEventListener("click", async () => {
-        const id = btn.dataset.id;
         try {
-          await client.deleteApiToken(id);
+          await client.deleteApiToken(btn.dataset.id);
           showToast("Token deleted", "success");
           loadTokens();
         } catch (err) {
@@ -1082,10 +973,8 @@ async function createToken(e) {
   try {
     const data = await client.createApiToken(name, scopes);
     closeModal("create-token-modal");
-
     document.getElementById("new-token-value").textContent = data.token;
     openModal("token-created-modal");
-
     loadTokens();
     document.getElementById("create-token-form").reset();
   } catch (err) {
@@ -1105,10 +994,14 @@ function showConfirm(title, message, callback) {
 // ============ Event Listeners ============
 
 document.addEventListener("DOMContentLoaded", async () => {
+  // Show loading while initializing
+  showLoading();
+
   const initialized = await initializeClient();
   if (!initialized) {
     document.getElementById("login-btn").disabled = true;
     document.getElementById("login-btn").textContent = "Connection Failed";
+    showLogin();
     return;
   }
 
@@ -1159,15 +1052,11 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // Delete document
   document.getElementById("delete-doc-btn").addEventListener("click", () => {
-    if (!currentDocId) return;
-    // Find the note by URL
-    const notes = getNotesFromAppDoc();
-    const note = notes.find((n) => n.url === currentDocId);
-    if (!note) return;
+    if (!currentDocUrl) return;
     showConfirm(
       "Delete Document",
       "Are you sure you want to delete this document? This cannot be undone.",
-      () => deleteDocument(note.id),
+      () => deleteDocument(currentDocUrl),
     );
   });
 
@@ -1181,7 +1070,6 @@ document.addEventListener("DOMContentLoaded", async () => {
         t.classList.remove("active");
       });
       tab.classList.add("active");
-
       const tabName = tab.dataset.tab;
       document
         .getElementById("account-settings")
@@ -1228,9 +1116,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // Keyboard shortcuts
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") {
-      closeAllModals();
-    }
+    if (e.key === "Escape") closeAllModals();
 
     if ((e.ctrlKey || e.metaKey) && e.key === "s") {
       e.preventDefault();
@@ -1251,9 +1137,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   client.onSyncEvent((event) => {
     switch (event.type) {
       case "connectivity:changed":
-        if (event.state === "offline") {
-          setSyncStatus("offline");
-        }
+        if (event.state === "offline") setSyncStatus("offline");
         break;
       case "auth:required":
         showToast("Session expired, please log in again", "warning");
@@ -1262,18 +1146,17 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
-  // Hash change listener for navigation
+  // Hash change listener
   window.addEventListener("hashchange", async () => {
     const hashDoc = getDocFromHash();
     if (hashDoc && client.isAuthenticated()) {
-      await openDocFromHash(hashDoc);
-    } else if (!hashDoc && currentDocId) {
-      // Hash was cleared, close document
+      await openDocumentByUrl(hashDoc.url);
+    } else if (!hashDoc && currentDocUrl) {
       closeDocument();
     }
   });
 
-  // Copy link button in share modal
+  // Copy link button
   document.getElementById("copy-link-btn")?.addEventListener("click", () => {
     const link = getShareableLink();
     if (link) {
