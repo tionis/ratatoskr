@@ -238,13 +238,11 @@
   async function createDocument(e) {
     e.preventDefault();
 
-    const prefix = document.getElementById("doc-prefix").value;
-    const id = prefix + document.getElementById("doc-id").value.trim();
     const type = document.getElementById("doc-type").value.trim() || undefined;
     const expiresAt = document.getElementById("doc-expires").value || undefined;
 
     try {
-      await api("POST", "/documents", { id, type, expiresAt });
+      await api("POST", "/documents", { type, expiresAt });
       closeModal("create-doc-modal");
       showToast("Document created", "success");
       loadDocuments();

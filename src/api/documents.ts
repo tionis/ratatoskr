@@ -29,6 +29,7 @@ import {
   readDocument,
   writeDocument,
 } from "../storage/documents.ts";
+import { getRepo } from "../sync/repo.ts";
 import {
   createDocumentSchema,
   updateDocumentAclSchema,
@@ -48,8 +49,16 @@ export async function documentRoutes(fastify: FastifyInstance): Promise<void> {
       return;
     }
 
-    const { id, automergeId, type, acl, expiresAt } = result.data;
+    let { id, automergeId, type, acl, expiresAt } = result.data;
     const userId = request.auth!.userId;
+
+    // Generate ID if not provided
+    if (!id) {
+      const repo = getRepo();
+      const handle = repo.create();
+      id = handle.url.replace("automerge:", "");
+      if (!automergeId) automergeId = id;
+    }
 
     // Validate document type
     const { prefix } = parseDocumentId(id);

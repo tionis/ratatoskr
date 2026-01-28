@@ -10,7 +10,7 @@ const flexibleDatetime = z
 
 // Document creation
 export const createDocumentSchema = z.object({
-  id: documentIdSchema,
+  id: documentIdSchema.optional(),
   automergeId: z.string().max(100).optional(),
   type: z.string().max(200).optional(),
   acl: z.array(aclEntrySchema).optional(),

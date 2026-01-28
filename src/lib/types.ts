@@ -1,12 +1,7 @@
 import { z } from "zod";
 
 // Document ID patterns
-export const documentIdSchema = z
-  .string()
-  .regex(
-    /^(doc|app|eph):[a-zA-Z0-9._-]+$/,
-    "Document ID must be prefixed with doc:, app:, or eph: followed by alphanumeric characters",
-  );
+export const documentIdSchema = z.string().min(1);
 
 export type DocumentId = z.infer<typeof documentIdSchema>;
 
@@ -16,13 +11,19 @@ export function parseDocumentId(id: string): {
   prefix: DocumentPrefix;
   localId: string;
 } {
-  const [prefix, ...rest] = id.split(":");
-  if (!prefix || !["doc", "app", "eph"].includes(prefix)) {
-    throw new Error(`Invalid document ID prefix: ${prefix}`);
+  if (id.startsWith("eph:")) {
+    return { prefix: "eph", localId: id.slice(4) };
   }
+  if (id.startsWith("app:")) {
+    return { prefix: "app", localId: id.slice(4) };
+  }
+  if (id.startsWith("doc:")) {
+    return { prefix: "doc", localId: id.slice(4) };
+  }
+  // Default to "doc" for unprefixed IDs (standard Automerge IDs)
   return {
-    prefix: prefix as DocumentPrefix,
-    localId: rest.join(":"),
+    prefix: "doc",
+    localId: id,
   };
 }
 

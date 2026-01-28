@@ -293,7 +293,7 @@ async function handleDoc(args: string[]) {
       const url = handle.url;
       const automergeId = url.replace("automerge:", "");
 
-      const id = `doc:${automergeId}`;
+      const id = automergeId;
 
       const payload = {
         id,
@@ -323,11 +323,15 @@ async function handleDoc(args: string[]) {
       const id = params[0];
       if (!id) throw new Error("Missing ID");
 
-      const automergeUrl = id.startsWith("doc:")
-        ? id.replace(/^doc:/, "automerge:")
-        : id;
+      let automergeUrl = id;
+      if (id.startsWith("doc:")) {
+        automergeUrl = id.replace(/^doc:/, "automerge:");
+      } else if (!id.startsWith("automerge:")) {
+        automergeUrl = `automerge:${id}`;
+      }
 
       const config = await loadConfig();
+
       const repo = await getRepo(config);
       const handle = (await repo.find(
         automergeUrl as AnyDocumentId,
@@ -389,11 +393,15 @@ async function handleDoc(args: string[]) {
       const id = params[0];
       if (!id) throw new Error("Missing ID");
 
-      const automergeUrl = id.startsWith("doc:")
-        ? id.replace(/^doc:/, "automerge:")
-        : id;
+      let automergeUrl = id;
+      if (id.startsWith("doc:")) {
+        automergeUrl = id.replace(/^doc:/, "automerge:");
+      } else if (!id.startsWith("automerge:")) {
+        automergeUrl = `automerge:${id}`;
+      }
 
       const config = await loadConfig();
+
       const repo = await getRepo(config);
       const handle = (await repo.find(
         automergeUrl as AnyDocumentId,
