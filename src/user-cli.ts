@@ -11,6 +11,48 @@ import { RatatoskrNetworkAdapter } from "./lib/cli-network-adapter.ts";
 
 const CONFIG_PATH = join(homedir(), ".ratatoskr-cli.json");
 
+const USAGE = {
+  doc: `
+Usage:
+  ratatoskr-user doc <command> [args]
+
+Commands:
+  list              List documents
+  get <id>          Get document metadata
+  create [type]     Create a new document
+  edit <id>         Edit document interactively
+  watch <id>        Watch document changes live
+  delete <id>       Delete a document
+`,
+  kv: `
+Usage:
+  ratatoskr-user kv <command> [args]
+
+Commands:
+  list <namespace>              List keys in namespace
+  get <namespace> <key>         Get value
+  set <namespace> <key> <value> Set value
+  delete <namespace> <key>      Delete value
+`,
+  blob: `
+Usage:
+  ratatoskr-user blob <command> [args]
+
+Commands:
+  list                        List claimed blobs
+  upload <file>               Upload a file
+  download <hash> [outfile]   Download a blob
+  delete <hash>               Release claim on blob
+`,
+};
+
+function checkHelp(args: string[], usage: string) {
+  if (args.includes("-h") || args.includes("--help") || args.includes("help")) {
+    console.log(usage);
+    process.exit(0);
+  }
+}
+
 interface Config {
   url: string;
   token: string;
@@ -197,6 +239,7 @@ async function handleWhoami() {
 
 // Document Handlers
 async function handleDoc(args: string[]) {
+  checkHelp(args, USAGE.doc);
   const [action, ...params] = args;
   switch (action) {
     case "list": {
@@ -268,6 +311,11 @@ async function handleDoc(args: string[]) {
 
       console.log("Document created:");
       console.table([doc]);
+
+      // Give the repo a moment to sync the new document to the server
+      console.log("Syncing new document to server...");
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+
       process.exit(0);
       break;
     }
@@ -286,7 +334,19 @@ async function handleDoc(args: string[]) {
       )) as DocHandle<unknown>;
 
       console.log("Syncing...");
-      await handle.whenReady();
+      try {
+        await Promise.race([
+          handle.whenReady(),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error("Timeout")), 5000),
+          ),
+        ]);
+      } catch (e) {
+        console.error(
+          "Error: Timed out waiting for document sync. Is the ID correct and valid?",
+        );
+        process.exit(1);
+      }
 
       const doc = await handle.doc();
       const content = JSON.stringify(doc, null, 2);
@@ -374,6 +434,7 @@ async function handleDoc(args: string[]) {
 
 // KV Handlers
 async function handleKv(args: string[]) {
+  checkHelp(args, USAGE.kv);
   const [action, ...params] = args;
   switch (action) {
     case "list": {
@@ -432,6 +493,7 @@ async function handleKv(args: string[]) {
 
 // Blob Handlers
 async function handleBlob(args: string[]) {
+  checkHelp(args, USAGE.blob);
   const [action, ...params] = args;
   switch (action) {
     case "list": {
