@@ -243,9 +243,14 @@ async function handleDoc(args: string[]) {
     }
     case "create": {
       const type = params[0];
+      const config = await loadConfig();
+      // Initialize repo to generate a valid Automerge ID
+      const repo = await getRepo(config);
+      const handle = repo.create();
+      const url = handle.url;
+      const automergeId = url.replace("automerge:", "");
 
-      const id = `doc:${crypto.randomUUID()}`;
-      const automergeId = id.replace("doc:", "");
+      const id = `doc:${automergeId}`;
 
       const payload = {
         id,
@@ -259,10 +264,11 @@ async function handleDoc(args: string[]) {
         body: JSON.stringify(payload),
       });
 
-      doc.automergeUrl = `automerge:${automergeId}`;
+      doc.automergeUrl = url;
 
       console.log("Document created:");
       console.table([doc]);
+      process.exit(0);
       break;
     }
     case "edit": {
