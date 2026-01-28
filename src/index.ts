@@ -1,12 +1,34 @@
+import { runAdminCli } from "./cli-handlers.ts";
 import { config } from "./config.ts";
 import { createServer } from "./server.ts";
 import { initDatabase } from "./storage/database.ts";
 import { initRepo, shutdownRepo } from "./sync/repo.ts";
 
 async function main() {
-  // Initialize database
+  const args = process.argv.slice(2);
+  const command = args[0];
+
+  // Initialize database (needed for both server and CLI)
   await initDatabase(config.dataDir);
 
+  // Check if the command is a CLI command or server start
+  // Known CLI categories: user, doc, blob, kv, help, --help, -h
+  const cliCommands = ["user", "doc", "blob", "kv", "help", "--help", "-h"];
+
+  if (!command || command === "server") {
+    await runServer();
+  } else if (cliCommands.includes(command)) {
+    await runAdminCli(args);
+    process.exit(0);
+  } else {
+    // If unknown command, show help
+    console.error(`Unknown command: ${command}`);
+    await runAdminCli(["help"]);
+    process.exit(1);
+  }
+}
+
+async function runServer() {
   // Initialize automerge-repo
   initRepo();
   console.log("Automerge-repo initialized");

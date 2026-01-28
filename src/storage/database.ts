@@ -279,6 +279,12 @@ export function updateUser(
   return row ? rowToUser(row) : null;
 }
 
+export function getAllUsers(limit = 100, offset = 0): User[] {
+  const stmt = getDb().prepare("SELECT * FROM users LIMIT ? OFFSET ?");
+  const rows = stmt.all(limit, offset) as Record<string, unknown>[];
+  return rows.map(rowToUser);
+}
+
 function rowToUser(row: Record<string, unknown>): User {
   return {
     id: row.id as string,
@@ -369,6 +375,12 @@ export function updateDocumentExpiration(
     WHERE id = ?
   `);
   stmt.run(expiresAt?.toISOString() ?? null, id);
+}
+
+export function getAllDocuments(limit = 100, offset = 0): DocumentMetadata[] {
+  const stmt = getDb().prepare("SELECT * FROM documents LIMIT ? OFFSET ?");
+  const rows = stmt.all(limit, offset) as Record<string, unknown>[];
+  return rows.map(rowToDocument);
 }
 
 function rowToDocument(row: Record<string, unknown>): DocumentMetadata {
@@ -553,6 +565,12 @@ export function getBlob(hash: string): BlobMetadata | null {
   const stmt = getDb().prepare("SELECT * FROM blobs WHERE hash = ?");
   const row = stmt.get(hash) as Record<string, unknown> | undefined;
   return row ? rowToBlob(row) : null;
+}
+
+export function getAllBlobs(limit = 100, offset = 0): BlobMetadata[] {
+  const stmt = getDb().prepare("SELECT * FROM blobs LIMIT ? OFFSET ?");
+  const rows = stmt.all(limit, offset) as Record<string, unknown>[];
+  return rows.map(rowToBlob);
 }
 
 export function deleteBlob(hash: string): boolean {

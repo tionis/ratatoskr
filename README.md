@@ -79,6 +79,7 @@ See [docs/dev.md](docs/dev.md) for full configuration options.
 ## Documentation
 
 - [Client Library](client/README.md) - Browser client library documentation
+- [CLI Tools](docs/cli.md) - Admin and User CLI documentation
 - [Design Document](DESIGN.md) - Architecture and API specification
 - [Development Guide](docs/dev.md) - Local development setup
 
