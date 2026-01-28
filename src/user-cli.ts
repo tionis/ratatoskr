@@ -200,17 +200,25 @@ async function handleDoc(args: string[]) {
   const [action, ...params] = args;
   switch (action) {
     case "list": {
-      const res = await apiCall("/api/v1/documents");
+      const res: any = await apiCall("/api/v1/documents");
+
+      const enrich = (d: any) => {
+        const parts = d.id.split(":");
+        if (parts.length > 1)
+          d.automergeUrl = `automerge:${parts.slice(1).join(":")}`;
+        return d;
+      };
+
       console.log("Owned Documents:");
       if (res.owned && res.owned.length > 0) {
-        console.table(res.owned);
+        console.table(res.owned.map(enrich));
       } else {
         console.log("(none)");
       }
 
       console.log("\nAccessible Documents:");
       if (res.accessible && res.accessible.length > 0) {
-        console.table(res.accessible);
+        console.table(res.accessible.map(enrich));
       } else {
         console.log("(none)");
       }
@@ -219,7 +227,17 @@ async function handleDoc(args: string[]) {
     case "get": {
       const id = params[0];
       if (!id) throw new Error("Missing ID");
-      const doc = await apiCall(`/api/v1/documents/${encodeURIComponent(id)}`);
+      const doc: any = await apiCall(
+        `/api/v1/documents/${encodeURIComponent(id)}`,
+      );
+
+      // Derive Automerge URL from ID (assuming prefix:id format)
+      // e.g. doc:uuid -> automerge:uuid
+      const parts = doc.id.split(":");
+      if (parts.length > 1) {
+        doc.automergeUrl = `automerge:${parts.slice(1).join(":")}`;
+      }
+
       console.table([doc]);
       break;
     }
@@ -235,11 +253,14 @@ async function handleDoc(args: string[]) {
         type,
       };
 
-      const doc = await apiCall("/api/v1/documents", {
+      const doc: any = await apiCall("/api/v1/documents", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
+
+      doc.automergeUrl = `automerge:${automergeId}`;
+
       console.log("Document created:");
       console.table([doc]);
       break;
