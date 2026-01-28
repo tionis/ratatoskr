@@ -21,4 +21,19 @@ export type {
 
 // Offline support
 export { IndexedDBStorageAdapter } from "./storage/indexeddb-storage-adapter.ts";
-export type { ACLEntry, ApiToken, DocumentMetadata, User } from "./types.ts";
+
+// Types
+export type {
+  ACLEntry,
+  ApiToken,
+  BlobInfo,
+  BlobUploadProgress,
+  CompleteUploadResponse,
+  CreateDocumentRequest,
+  DocumentBlobsResponse,
+  DocumentMetadata,
+  InitUploadResponse,
+  ListBlobsResponse,
+  ListDocumentsResponse,
+  User,
+} from "./types.ts";

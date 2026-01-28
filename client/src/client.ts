@@ -34,8 +34,14 @@ import { IndexedDBStorageAdapter } from "./storage/indexeddb-storage-adapter.ts"
 import type {
   ACLEntry,
   ApiToken,
+  BlobInfo,
+  BlobUploadProgress,
+  CompleteUploadResponse,
   CreateDocumentRequest,
+  DocumentBlobsResponse,
   DocumentMetadata,
+  InitUploadResponse,
+  ListBlobsResponse,
   ListDocumentsResponse,
   User,
 } from "./types.ts";
@@ -728,6 +734,410 @@ export class RatatoskrClient {
     }
 
     return { handle, url, isNew: true };
+  }
+
+  // ============ Blob Methods ============
+
+  /**
+   * Upload a blob to the server.
+   *
+   * The blob is uploaded in chunks for reliability and to support large files.
+   * Progress updates are provided through the onProgress callback.
+   *
+   * @param data - The blob data to upload
+   * @param options - Upload options
+   * @returns The uploaded blob info including its hash
+   */
+  async uploadBlob(
+    data: Blob | File | ArrayBuffer | Uint8Array,
+    options: {
+      mimeType?: string;
+      onProgress?: (progress: BlobUploadProgress) => void;
+    } = {},
+  ): Promise<BlobInfo> {
+    const { onProgress } = options;
+
+    // Convert to Uint8Array
+    let bytes: Uint8Array;
+    let mimeType = options.mimeType ?? "application/octet-stream";
+
+    if (data instanceof Blob || data instanceof File) {
+      mimeType = options.mimeType ?? (data.type || "application/octet-stream");
+      bytes = new Uint8Array(await data.arrayBuffer());
+    } else if (data instanceof ArrayBuffer) {
+      bytes = new Uint8Array(data);
+    } else {
+      bytes = data;
+    }
+
+    const totalSize = bytes.length;
+
+    // Phase 1: Compute hash locally
+    onProgress?.({
+      phase: "hashing",
+      bytesProcessed: 0,
+      totalBytes: totalSize,
+    });
+
+    const hashBuffer = await crypto.subtle.digest("SHA-256", bytes);
+    const hashArray = new Uint8Array(hashBuffer);
+    const expectedHash = Array.from(hashArray)
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+
+    onProgress?.({
+      phase: "hashing",
+      bytesProcessed: totalSize,
+      totalBytes: totalSize,
+    });
+
+    // Phase 2: Check if blob already exists
+    onProgress?.({
+      phase: "checking",
+      bytesProcessed: 0,
+      totalBytes: totalSize,
+    });
+
+    const headResponse = await this.fetch(`/api/v1/blobs/${expectedHash}`, {
+      method: "HEAD",
+    });
+
+    if (headResponse.ok) {
+      // Blob exists, just claim it
+      const claimResponse = await this.fetch(
+        `/api/v1/blobs/${expectedHash}/claim`,
+        {
+          method: "POST",
+        },
+      );
+
+      if (claimResponse.ok || claimResponse.status === 409) {
+        // Either claimed or already claimed
+        onProgress?.({
+          phase: "complete",
+          bytesProcessed: totalSize,
+          totalBytes: totalSize,
+        });
+
+        // Fetch blob info
+        const infoResponse = await this.fetch(`/api/v1/blobs/${expectedHash}`, {
+          method: "HEAD",
+        });
+        const size = Number.parseInt(
+          infoResponse.headers.get("Content-Length") ?? "0",
+          10,
+        );
+        const blobMimeType =
+          infoResponse.headers.get("Content-Type") ?? mimeType;
+
+        return {
+          hash: expectedHash,
+          size,
+          mimeType: blobMimeType,
+        };
+      }
+
+      const error = await claimResponse.json();
+      throw new Error(error.message ?? "Failed to claim blob");
+    }
+
+    // Phase 3: Upload chunks
+    onProgress?.({
+      phase: "uploading",
+      bytesProcessed: 0,
+      totalBytes: totalSize,
+      chunksUploaded: 0,
+      totalChunks: 0,
+    });
+
+    // Initialize upload
+    const initResponse = await this.fetch("/api/v1/blobs/upload/init", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        size: totalSize,
+        mimeType,
+        expectedHash,
+      }),
+    });
+
+    if (!initResponse.ok) {
+      const error = await initResponse.json();
+      throw new Error(error.message ?? "Failed to initialize upload");
+    }
+
+    const uploadInfo: InitUploadResponse = await initResponse.json();
+    const { uploadId, chunkSize, totalChunks } = uploadInfo;
+
+    // Upload chunks
+    let bytesUploaded = 0;
+    for (let i = 0; i < totalChunks; i++) {
+      const start = i * chunkSize;
+      const end = Math.min(start + chunkSize, totalSize);
+      const chunk = bytes.slice(start, end);
+
+      const chunkResponse = await this.fetch(
+        `/api/v1/blobs/upload/${uploadId}/chunk/${i}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/octet-stream" },
+          body: chunk,
+        },
+      );
+
+      if (!chunkResponse.ok) {
+        const error = await chunkResponse.json();
+        throw new Error(error.message ?? `Failed to upload chunk ${i}`);
+      }
+
+      bytesUploaded += chunk.length;
+      onProgress?.({
+        phase: "uploading",
+        bytesProcessed: bytesUploaded,
+        totalBytes: totalSize,
+        chunksUploaded: i + 1,
+        totalChunks,
+      });
+    }
+
+    // Complete upload
+    const completeResponse = await this.fetch(
+      `/api/v1/blobs/upload/${uploadId}/complete`,
+      {
+        method: "POST",
+      },
+    );
+
+    if (!completeResponse.ok) {
+      const error = await completeResponse.json();
+      throw new Error(error.message ?? "Failed to complete upload");
+    }
+
+    const result: CompleteUploadResponse = await completeResponse.json();
+
+    onProgress?.({
+      phase: "complete",
+      bytesProcessed: totalSize,
+      totalBytes: totalSize,
+      chunksUploaded: totalChunks,
+      totalChunks,
+    });
+
+    return {
+      hash: result.hash,
+      size: result.size,
+      mimeType: result.mimeType,
+    };
+  }
+
+  /**
+   * Download a blob by its hash.
+   *
+   * @param hash - The SHA-256 hash of the blob
+   * @returns The blob data as Uint8Array
+   */
+  async downloadBlob(hash: string): Promise<Uint8Array> {
+    const response = await this.fetch(`/api/v1/blobs/${hash}`);
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message ?? "Failed to download blob");
+    }
+
+    const buffer = await response.arrayBuffer();
+    return new Uint8Array(buffer);
+  }
+
+  /**
+   * Get the direct URL for a blob.
+   * Useful for <img src="..."> or other direct access.
+   *
+   * @param hash - The SHA-256 hash of the blob
+   * @returns The full URL to the blob
+   */
+  getBlobUrl(hash: string): string {
+    return `${this.serverUrl}/api/v1/blobs/${hash}`;
+  }
+
+  /**
+   * Get blob metadata without downloading the content.
+   *
+   * @param hash - The SHA-256 hash of the blob
+   * @returns The blob info or null if not found
+   */
+  async getBlobInfo(hash: string): Promise<BlobInfo | null> {
+    const response = await this.fetch(`/api/v1/blobs/${hash}`, {
+      method: "HEAD",
+    });
+
+    if (response.status === 404) {
+      return null;
+    }
+
+    if (!response.ok) {
+      throw new Error("Failed to get blob info");
+    }
+
+    return {
+      hash,
+      size: Number.parseInt(response.headers.get("Content-Length") ?? "0", 10),
+      mimeType:
+        response.headers.get("Content-Type") ?? "application/octet-stream",
+    };
+  }
+
+  /**
+   * Claim an existing blob by its hash.
+   *
+   * @param hash - The SHA-256 hash of the blob
+   * @returns The blob info
+   */
+  async claimBlob(hash: string): Promise<BlobInfo> {
+    const response = await this.fetch(`/api/v1/blobs/${hash}/claim`, {
+      method: "POST",
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message ?? "Failed to claim blob");
+    }
+
+    return response.json();
+  }
+
+  /**
+   * Release a claim on a blob.
+   *
+   * @param hash - The SHA-256 hash of the blob
+   */
+  async releaseBlobClaim(hash: string): Promise<void> {
+    const response = await this.fetch(`/api/v1/blobs/${hash}/claim`, {
+      method: "DELETE",
+    });
+
+    if (!response.ok && response.status !== 404) {
+      const error = await response.json();
+      throw new Error(error.message ?? "Failed to release blob claim");
+    }
+  }
+
+  /**
+   * List all blobs claimed by the current user.
+   *
+   * @param options - Pagination options
+   * @returns List of claimed blobs with quota info
+   */
+  async listClaimedBlobs(
+    options: { limit?: number; offset?: number } = {},
+  ): Promise<ListBlobsResponse> {
+    const params = new URLSearchParams();
+    if (options.limit !== undefined) params.set("limit", String(options.limit));
+    if (options.offset !== undefined)
+      params.set("offset", String(options.offset));
+
+    const query = params.toString();
+    const response = await this.fetch(
+      `/api/v1/blobs${query ? `?${query}` : ""}`,
+    );
+
+    if (!response.ok) {
+      throw new Error("Failed to list blobs");
+    }
+
+    return response.json();
+  }
+
+  // ============ Document Blob Methods ============
+
+  /**
+   * Add a document claim on a blob.
+   * The blob will be linked to the document and cleaned up when the document is deleted.
+   *
+   * @param documentId - The document ID
+   * @param blobHash - The SHA-256 hash of the blob
+   */
+  async addDocumentBlobClaim(
+    documentId: string,
+    blobHash: string,
+  ): Promise<void> {
+    const response = await this.fetch(
+      `/api/v1/documents/${encodeURIComponent(documentId)}/blobs/${blobHash}`,
+      {
+        method: "POST",
+      },
+    );
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message ?? "Failed to add document blob claim");
+    }
+  }
+
+  /**
+   * Remove a document claim on a blob.
+   *
+   * @param documentId - The document ID
+   * @param blobHash - The SHA-256 hash of the blob
+   */
+  async removeDocumentBlobClaim(
+    documentId: string,
+    blobHash: string,
+  ): Promise<void> {
+    const response = await this.fetch(
+      `/api/v1/documents/${encodeURIComponent(documentId)}/blobs/${blobHash}`,
+      {
+        method: "DELETE",
+      },
+    );
+
+    if (!response.ok && response.status !== 404) {
+      const error = await response.json();
+      throw new Error(error.message ?? "Failed to remove document blob claim");
+    }
+  }
+
+  /**
+   * List all blobs claimed by a document.
+   *
+   * @param documentId - The document ID
+   * @returns List of blobs with total size
+   */
+  async listDocumentBlobs(documentId: string): Promise<DocumentBlobsResponse> {
+    const response = await this.fetch(
+      `/api/v1/documents/${encodeURIComponent(documentId)}/blobs`,
+    );
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message ?? "Failed to list document blobs");
+    }
+
+    return response.json();
+  }
+
+  /**
+   * Upload a blob and immediately attach it to a document.
+   *
+   * @param documentId - The document ID to attach the blob to
+   * @param data - The blob data to upload
+   * @param options - Upload options
+   * @returns The uploaded blob info
+   */
+  async uploadBlobToDocument(
+    documentId: string,
+    data: Blob | File | ArrayBuffer | Uint8Array,
+    options: {
+      mimeType?: string;
+      onProgress?: (progress: BlobUploadProgress) => void;
+    } = {},
+  ): Promise<BlobInfo> {
+    // Upload the blob
+    const blobInfo = await this.uploadBlob(data, options);
+
+    // Add document claim
+    await this.addDocumentBlobClaim(documentId, blobInfo.hash);
+
+    return blobInfo;
   }
 
   /**

@@ -44,3 +44,46 @@ export interface ApiToken {
   expiresAt: string | null;
   createdAt: string;
 }
+
+// Blob types
+
+export interface BlobInfo {
+  hash: string;
+  size: number;
+  mimeType: string;
+  claimedAt?: string;
+}
+
+export interface BlobUploadProgress {
+  phase: "hashing" | "checking" | "uploading" | "complete";
+  bytesProcessed: number;
+  totalBytes: number;
+  chunksUploaded?: number;
+  totalChunks?: number;
+}
+
+export interface InitUploadResponse {
+  uploadId: string;
+  chunkSize: number;
+  totalChunks: number;
+  expiresAt: string;
+}
+
+export interface CompleteUploadResponse {
+  hash: string;
+  size: number;
+  mimeType: string;
+  deduplicated: boolean;
+}
+
+export interface ListBlobsResponse {
+  blobs: BlobInfo[];
+  total: number;
+  quotaUsed: number;
+  quotaLimit: number;
+}
+
+export interface DocumentBlobsResponse {
+  blobs: BlobInfo[];
+  totalSize: number;
+}
