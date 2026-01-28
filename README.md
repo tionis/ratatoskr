@@ -9,12 +9,13 @@ Ratatoskr is an automerge-repo sync server with authentication and per-document 
 - **Web UI**: Built-in dashboard for managing documents, ACLs, and API tokens
 - **Per-document permissions**: Flexible ACL system with owner-based access control
 - **Offline-first client**: Create and edit documents offline, auto-sync when back online
+- **Blob storage**: Content-addressable file storage with chunked uploads and deduplication
 - **Multiple document types**:
   - `doc:` - Regular documents with full ACL support
   - `app:` - Per-user-per-app private documents
   - `eph:` - Ephemeral relay documents for temporary collaboration
 - **Rate limiting**: Protection against abuse for anonymous users
-- **Quotas**: Per-user limits on document count, size, and total storage
+- **Quotas**: Per-user limits on document count, size, blob storage, and total storage
 
 ## Quick Start
 
@@ -106,6 +107,12 @@ Features:
 | `POST /api/v1/documents` | Create document |
 | `GET /api/v1/documents` | List documents |
 | `PUT /api/v1/documents/:id/acl` | Update document ACL |
+| `POST /api/v1/blobs/upload/init` | Initialize chunked blob upload |
+| `PUT /api/v1/blobs/upload/:id/chunk/:index` | Upload a chunk |
+| `POST /api/v1/blobs/upload/:id/complete` | Complete blob upload |
+| `GET /api/v1/blobs/:hash` | Download blob by hash |
+| `POST /api/v1/blobs/:hash/claim` | Claim an existing blob |
+| `GET /api/v1/blobs` | List user's claimed blobs |
 
 ### WebSocket Sync
 

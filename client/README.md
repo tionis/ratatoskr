@@ -411,6 +411,108 @@ This pattern ensures:
 - Subsequent calls return the same document
 - No need for localStorage management
 
+#### Blob Storage
+
+Ratatoskr provides content-addressable blob storage with automatic deduplication. Blobs are identified by their SHA-256 hash and can be shared across users.
+
+##### `uploadBlob(data, options?): Promise<BlobInfo>`
+
+Upload a blob to the server with chunked upload support for large files.
+
+```typescript
+// Upload a file
+const file = document.querySelector('input[type="file"]').files[0];
+const blob = await client.uploadBlob(file, {
+  onProgress: (progress) => {
+    console.log(`${progress.phase}: ${progress.bytesProcessed}/${progress.totalBytes}`);
+  }
+});
+console.log('Uploaded:', blob.hash);
+
+// Upload raw data
+const data = new Uint8Array([1, 2, 3, 4]);
+const result = await client.uploadBlob(data, {
+  mimeType: 'application/octet-stream'
+});
+```
+
+Progress phases: `"hashing"` → `"checking"` → `"uploading"` → `"complete"`
+
+##### `downloadBlob(hash): Promise<Uint8Array>`
+
+Download a blob by its hash.
+
+```typescript
+const data = await client.downloadBlob('abc123...');
+```
+
+##### `getBlobUrl(hash): string`
+
+Get the direct URL for a blob. Useful for `<img src="...">` or direct links.
+
+```typescript
+const url = client.getBlobUrl('abc123...');
+// https://server.com/api/v1/blobs/abc123...
+```
+
+##### `getBlobInfo(hash): Promise<BlobInfo | null>`
+
+Get blob metadata without downloading the content.
+
+```typescript
+const info = await client.getBlobInfo('abc123...');
+if (info) {
+  console.log(`Size: ${info.size}, Type: ${info.mimeType}`);
+}
+```
+
+##### `claimBlob(hash): Promise<BlobInfo>`
+
+Claim an existing blob by its hash. This adds you as a claimer, counting towards your quota.
+
+```typescript
+const blob = await client.claimBlob('abc123...');
+```
+
+##### `releaseBlobClaim(hash): Promise<void>`
+
+Release your claim on a blob. When all claims are released, the blob is cleaned up after a grace period.
+
+```typescript
+await client.releaseBlobClaim('abc123...');
+```
+
+##### `listClaimedBlobs(options?): Promise<ListBlobsResponse>`
+
+List all blobs you've claimed with quota information.
+
+```typescript
+const { blobs, total, quotaUsed, quotaLimit } = await client.listClaimedBlobs({
+  limit: 20,
+  offset: 0
+});
+
+console.log(`Using ${quotaUsed} of ${quotaLimit} bytes`);
+```
+
+##### Document Blob Claims
+
+Blobs can be attached to documents. When the document is deleted, its blob claims are automatically released.
+
+```typescript
+// Upload and attach to document in one call
+const blob = await client.uploadBlobToDocument('doc:my-doc', file);
+
+// Or attach an existing blob to a document
+await client.addDocumentBlobClaim('doc:my-doc', 'abc123...');
+
+// Remove blob from document
+await client.removeDocumentBlobClaim('doc:my-doc', 'abc123...');
+
+// List document's blobs
+const { blobs, totalSize } = await client.listDocumentBlobs('doc:my-doc');
+```
+
 #### Offline-First Document Creation
 
 Documents can be created and edited offline. They'll be registered on the server when connectivity and authentication are restored.
@@ -554,6 +656,34 @@ interface ApiToken {
   lastUsedAt: string | null;
   expiresAt: string | null;
   createdAt: string;
+}
+
+// Blob types
+interface BlobInfo {
+  hash: string;
+  size: number;
+  mimeType: string;
+  claimedAt?: string;
+}
+
+interface BlobUploadProgress {
+  phase: 'hashing' | 'checking' | 'uploading' | 'complete';
+  bytesProcessed: number;
+  totalBytes: number;
+  chunksUploaded?: number;
+  totalChunks?: number;
+}
+
+interface ListBlobsResponse {
+  blobs: BlobInfo[];
+  total: number;
+  quotaUsed: number;
+  quotaLimit: number;
+}
+
+interface DocumentBlobsResponse {
+  blobs: BlobInfo[];
+  totalSize: number;
 }
 
 // Offline support types

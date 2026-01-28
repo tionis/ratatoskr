@@ -220,6 +220,7 @@
         <li><a href="#quickstart">Quick Start</a></li>
         <li><a href="#installation">Installation</a></li>
         <li><a href="#api">API Reference</a></li>
+        <li><a href="#blobs">Blob Storage</a></li>
         <li><a href="#types">Types</a></li>
         <li><a href="#examples">Examples</a></li>
         <li><a href="#errors">Error Handling</a></li>
@@ -546,6 +547,101 @@ console.log(`Synced ${result.processed} documents`);</code></pre>
       <p>Cleanup all resources including IndexedDB connections.</p>
     </section>
 
+    <section id="blobs">
+      <h2>Blob Storage</h2>
+      <p>Ratatoskr provides content-addressable blob storage with automatic deduplication. Blobs are identified by their SHA-256 hash and can be shared across users.</p>
+
+      <h3>Uploading Blobs</h3>
+
+      <h4><code>uploadBlob(data, options?): Promise&lt;BlobInfo&gt;</code></h4>
+      <p>Upload a blob to the server. Supports chunked uploads for large files with progress tracking.</p>
+      <pre><code class="language-javascript">// Upload a file with progress tracking
+const file = document.querySelector('input[type="file"]').files[0];
+const blob = await client.uploadBlob(file, {
+  onProgress: (progress) => {
+    console.log(`${progress.phase}: ${progress.bytesProcessed}/${progress.totalBytes}`);
+    // Phases: "hashing" -> "checking" -> "uploading" -> "complete"
+  }
+});
+console.log('Uploaded:', blob.hash);
+
+// Upload raw data
+const data = new Uint8Array([1, 2, 3, 4]);
+const result = await client.uploadBlob(data, {
+  mimeType: 'application/octet-stream'
+});</code></pre>
+
+      <p><strong>Progress Phases:</strong></p>
+      <table>
+        <tr><th>Phase</th><th>Description</th></tr>
+        <tr><td><code>hashing</code></td><td>Computing SHA-256 hash locally</td></tr>
+        <tr><td><code>checking</code></td><td>Checking if blob already exists (deduplication)</td></tr>
+        <tr><td><code>uploading</code></td><td>Uploading chunks to server</td></tr>
+        <tr><td><code>complete</code></td><td>Upload finished</td></tr>
+      </table>
+
+      <h3>Downloading Blobs</h3>
+
+      <h4><code>downloadBlob(hash): Promise&lt;Uint8Array&gt;</code></h4>
+      <p>Download a blob by its hash.</p>
+      <pre><code class="language-javascript">const data = await client.downloadBlob('abc123...');
+// Use the data...</code></pre>
+
+      <h4><code>getBlobUrl(hash): string</code></h4>
+      <p>Get the direct URL for a blob. Useful for <code>&lt;img src="..."&gt;</code> or direct links.</p>
+      <pre><code class="language-javascript">const url = client.getBlobUrl('abc123...');
+document.querySelector('img').src = url;</code></pre>
+
+      <h4><code>getBlobInfo(hash): Promise&lt;BlobInfo | null&gt;</code></h4>
+      <p>Get blob metadata without downloading the content.</p>
+      <pre><code class="language-javascript">const info = await client.getBlobInfo('abc123...');
+if (info) {
+  console.log(`Size: ${info.size}, Type: ${info.mimeType}`);
+}</code></pre>
+
+      <h3>Blob Claims</h3>
+      <p>Blobs use a claims-based lifecycle. Each user who needs a blob claims it, which counts towards their storage quota. When all claims are released, the blob is cleaned up after a 24-hour grace period.</p>
+
+      <h4><code>claimBlob(hash): Promise&lt;BlobInfo&gt;</code></h4>
+      <p>Claim an existing blob by its hash. Useful when you know a blob's hash and want to ensure it's not deleted.</p>
+      <pre><code class="language-javascript">const blob = await client.claimBlob('abc123...');</code></pre>
+
+      <h4><code>releaseBlobClaim(hash): Promise&lt;void&gt;</code></h4>
+      <p>Release your claim on a blob.</p>
+      <pre><code class="language-javascript">await client.releaseBlobClaim('abc123...');</code></pre>
+
+      <h4><code>listClaimedBlobs(options?): Promise&lt;ListBlobsResponse&gt;</code></h4>
+      <p>List all blobs you've claimed with quota information.</p>
+      <pre><code class="language-javascript">const { blobs, total, quotaUsed, quotaLimit } = await client.listClaimedBlobs({
+  limit: 20,
+  offset: 0
+});
+
+console.log(`Using ${quotaUsed} of ${quotaLimit} bytes`);</code></pre>
+
+      <h3>Document Blob Claims</h3>
+      <p>Blobs can be attached to documents. When the document is deleted, its blob claims are automatically released.</p>
+
+      <h4><code>uploadBlobToDocument(documentId, data, options?): Promise&lt;BlobInfo&gt;</code></h4>
+      <p>Upload a blob and immediately attach it to a document.</p>
+      <pre><code class="language-javascript">const blob = await client.uploadBlobToDocument('doc:my-doc', file, {
+  onProgress: (p) => console.log(p.phase)
+});</code></pre>
+
+      <h4><code>addDocumentBlobClaim(documentId, hash): Promise&lt;void&gt;</code></h4>
+      <p>Attach an existing blob to a document.</p>
+      <pre><code class="language-javascript">await client.addDocumentBlobClaim('doc:my-doc', 'abc123...');</code></pre>
+
+      <h4><code>removeDocumentBlobClaim(documentId, hash): Promise&lt;void&gt;</code></h4>
+      <p>Remove a blob from a document.</p>
+      <pre><code class="language-javascript">await client.removeDocumentBlobClaim('doc:my-doc', 'abc123...');</code></pre>
+
+      <h4><code>listDocumentBlobs(documentId): Promise&lt;DocumentBlobsResponse&gt;</code></h4>
+      <p>List all blobs attached to a document.</p>
+      <pre><code class="language-javascript">const { blobs, totalSize } = await client.listDocumentBlobs('doc:my-doc');
+console.log(`Document has ${blobs.length} blobs (${totalSize} bytes)`);</code></pre>
+    </section>
+
     <section id="types">
       <h2>Types</h2>
 
@@ -589,6 +685,34 @@ interface ApiToken {
   lastUsedAt: string | null;
   expiresAt: string | null;
   createdAt: string;
+}
+
+// Blob types
+interface BlobInfo {
+  hash: string;
+  size: number;
+  mimeType: string;
+  claimedAt?: string;
+}
+
+interface BlobUploadProgress {
+  phase: 'hashing' | 'checking' | 'uploading' | 'complete';
+  bytesProcessed: number;
+  totalBytes: number;
+  chunksUploaded?: number;
+  totalChunks?: number;
+}
+
+interface ListBlobsResponse {
+  blobs: BlobInfo[];
+  total: number;
+  quotaUsed: number;
+  quotaLimit: number;
+}
+
+interface DocumentBlobsResponse {
+  blobs: BlobInfo[];
+  totalSize: number;
 }
 
 // Offline support types
