@@ -40,3 +40,43 @@ export const createApiTokenSchema = z.object({
 });
 
 export type CreateApiTokenRequest = z.infer<typeof createApiTokenSchema>;
+
+// Blob upload initialization
+export const initBlobUploadSchema = z.object({
+  size: z.number().int().positive(),
+  mimeType: z.string().min(1).max(200),
+  expectedHash: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .optional(),
+  chunkSize: z
+    .number()
+    .int()
+    .min(1024) // 1 KB minimum
+    .max(10 * 1024 * 1024) // 10 MB maximum
+    .optional(),
+});
+
+export type InitBlobUploadRequest = z.infer<typeof initBlobUploadSchema>;
+
+// Blob hash parameter
+export const blobHashParamSchema = z.object({
+  hash: z.string().regex(/^[a-f0-9]{64}$/),
+});
+
+// Upload ID parameter
+export const uploadIdParamSchema = z.object({
+  uploadId: z.string().uuid(),
+});
+
+// Chunk index parameter
+export const chunkIndexParamSchema = z.object({
+  uploadId: z.string().uuid(),
+  index: z.coerce.number().int().nonnegative(),
+});
+
+// List blobs query
+export const listBlobsQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).optional().default(50),
+  offset: z.coerce.number().int().nonnegative().optional().default(0),
+});

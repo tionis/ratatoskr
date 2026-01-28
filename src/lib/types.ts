@@ -45,6 +45,8 @@ export interface User {
   quotaMaxDocuments: number;
   quotaMaxDocumentSize: number;
   quotaMaxTotalStorage: number;
+  quotaMaxBlobStorage: number;
+  quotaMaxBlobSize: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -77,3 +79,48 @@ export interface AuthContext {
   userId: string;
   isAnonymous: boolean;
 }
+
+// Blob metadata
+export interface BlobMetadata {
+  hash: string;
+  size: number;
+  mimeType: string;
+  createdAt: Date;
+  releasedAt: Date | null;
+}
+
+// Blob claim (user claiming a blob)
+export interface BlobClaim {
+  blobHash: string;
+  userId: string;
+  claimedAt: Date;
+}
+
+// Document blob claim (document claiming a blob)
+export interface DocumentBlobClaim {
+  blobHash: string;
+  documentId: string;
+  ownerId: string;
+  claimedAt: Date;
+}
+
+// Blob upload session (for chunked uploads)
+export interface BlobUpload {
+  id: string;
+  userId: string;
+  expectedHash: string | null;
+  expectedSize: number;
+  mimeType: string;
+  chunkSize: number;
+  chunksReceived: number;
+  totalChunks: number;
+  createdAt: Date;
+  expiresAt: Date;
+}
+
+// Blob hash validation (SHA-256 hex string, 64 chars)
+export const blobHashSchema = z
+  .string()
+  .regex(/^[a-f0-9]{64}$/, "Blob hash must be a valid SHA-256 hex string");
+
+export type BlobHash = z.infer<typeof blobHashSchema>;

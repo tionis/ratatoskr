@@ -1,16 +1,22 @@
 import * as Automerge from "@automerge/automerge";
 import type { FastifyInstance } from "fastify";
 import { requireAuth } from "../auth/middleware.ts";
-import { checkDocumentCreationQuota } from "../lib/quotas.ts";
+import { checkBlobQuota, checkDocumentCreationQuota } from "../lib/quotas.ts";
 import { parseDocumentId } from "../lib/types.ts";
 import {
   createDocument,
+  createDocumentBlobClaim,
   deleteDocument,
+  deleteDocumentBlobClaim,
   getAccessibleDocuments,
+  getBlob,
   getDocument,
   getDocumentACL,
+  getDocumentBlobClaim,
+  getDocumentBlobClaims,
   getDocumentsByOwner,
   getUser,
+  getUserBlobStorageUsed,
   getUserDocumentCount,
   getUserTotalStorage,
   setDocumentACL,
@@ -755,6 +761,224 @@ export async function documentRoutes(fastify: FastifyInstance): Promise<void> {
         });
         return;
       }
+    },
+  );
+
+  // Document blob claims
+
+  // Add document claim on blob
+  fastify.post(
+    "/:id/blobs/:hash",
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const { id, hash } = request.params as { id: string; hash: string };
+      const userId = request.auth!.userId;
+
+      // Validate hash format
+      if (!/^[a-f0-9]{64}$/.test(hash)) {
+        return reply.code(400).send({
+          error: "invalid_request",
+          message: "Invalid blob hash format",
+        });
+      }
+
+      // Get document
+      const doc = getDocument(id);
+      if (!doc) {
+        return reply.code(404).send({
+          error: "not_found",
+          message: "Document not found",
+        });
+      }
+
+      // Check write access
+      if (doc.ownerId !== userId) {
+        const acl = getDocumentACL(id);
+        const hasAccess = acl.some(
+          (e) =>
+            (e.principal === userId || e.principal === "public") &&
+            e.permission === "write",
+        );
+
+        if (!hasAccess) {
+          return reply.code(403).send({
+            error: "forbidden",
+            message: "Write access required to add blob claims",
+          });
+        }
+      }
+
+      // Get blob
+      const blob = getBlob(hash);
+      if (!blob) {
+        return reply.code(404).send({
+          error: "not_found",
+          message: "Blob not found",
+        });
+      }
+
+      // Check if already claimed by this document
+      const existingClaim = getDocumentBlobClaim(hash, id);
+      if (existingClaim) {
+        return reply.code(409).send({
+          error: "already_claimed",
+          message: "Document has already claimed this blob",
+        });
+      }
+
+      // Check quota for document owner
+      const owner = getUser(doc.ownerId);
+      if (!owner) {
+        return reply.code(500).send({
+          error: "internal_error",
+          message: "Document owner not found",
+        });
+      }
+
+      const quotaCheck = await checkBlobQuota(
+        { getUserBlobStorageUsed: async (uid) => getUserBlobStorageUsed(uid) },
+        owner,
+        blob.size,
+      );
+
+      if (!quotaCheck.allowed) {
+        return reply.code(402).send({
+          error: "quota_exceeded",
+          message: "Document owner's blob quota exceeded",
+          quota: quotaCheck.quota,
+          current: quotaCheck.current,
+          limit: quotaCheck.limit,
+          required: blob.size,
+        });
+      }
+
+      // Create document claim
+      const claim = createDocumentBlobClaim(hash, id, doc.ownerId);
+
+      return reply.code(200).send({
+        hash: blob.hash,
+        size: blob.size,
+        mimeType: blob.mimeType,
+        documentId: claim.documentId,
+        claimedAt: claim.claimedAt.toISOString(),
+      });
+    },
+  );
+
+  // Remove document claim on blob
+  fastify.delete(
+    "/:id/blobs/:hash",
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const { id, hash } = request.params as { id: string; hash: string };
+      const userId = request.auth!.userId;
+
+      // Validate hash format
+      if (!/^[a-f0-9]{64}$/.test(hash)) {
+        return reply.code(400).send({
+          error: "invalid_request",
+          message: "Invalid blob hash format",
+        });
+      }
+
+      // Get document
+      const doc = getDocument(id);
+      if (!doc) {
+        return reply.code(404).send({
+          error: "not_found",
+          message: "Document not found",
+        });
+      }
+
+      // Check write access
+      if (doc.ownerId !== userId) {
+        const acl = getDocumentACL(id);
+        const hasAccess = acl.some(
+          (e) =>
+            (e.principal === userId || e.principal === "public") &&
+            e.permission === "write",
+        );
+
+        if (!hasAccess) {
+          return reply.code(403).send({
+            error: "forbidden",
+            message: "Write access required to remove blob claims",
+          });
+        }
+      }
+
+      // Check if claimed
+      const existingClaim = getDocumentBlobClaim(hash, id);
+      if (!existingClaim) {
+        return reply.code(404).send({
+          error: "not_found",
+          message: "Document has not claimed this blob",
+        });
+      }
+
+      // Delete claim
+      deleteDocumentBlobClaim(hash, id);
+
+      return reply.code(204).send();
+    },
+  );
+
+  // List blobs claimed by document
+  fastify.get(
+    "/:id/blobs",
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const userId = request.auth!.userId;
+
+      // Get document
+      const doc = getDocument(id);
+      if (!doc) {
+        return reply.code(404).send({
+          error: "not_found",
+          message: "Document not found",
+        });
+      }
+
+      // Check read access
+      if (doc.ownerId !== userId) {
+        const acl = getDocumentACL(id);
+        const hasAccess = acl.some(
+          (e) =>
+            (e.principal === userId || e.principal === "public") &&
+            (e.permission === "read" || e.permission === "write"),
+        );
+
+        if (!hasAccess) {
+          return reply.code(403).send({
+            error: "forbidden",
+            message: "Access denied",
+          });
+        }
+      }
+
+      // Get document blob claims
+      const claims = getDocumentBlobClaims(id);
+      let totalSize = 0;
+
+      const blobs = claims
+        .map((claim) => {
+          const blob = getBlob(claim.blobHash);
+          if (!blob) return null;
+          totalSize += blob.size;
+          return {
+            hash: blob.hash,
+            size: blob.size,
+            mimeType: blob.mimeType,
+            claimedAt: claim.claimedAt.toISOString(),
+          };
+        })
+        .filter(Boolean);
+
+      return reply.code(200).send({
+        blobs,
+        totalSize,
+      });
     },
   );
 }

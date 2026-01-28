@@ -1,7 +1,15 @@
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import type { ACLEntry, DocumentMetadata, User } from "../lib/types.ts";
+import type {
+  ACLEntry,
+  BlobClaim,
+  BlobMetadata,
+  BlobUpload,
+  DocumentBlobClaim,
+  DocumentMetadata,
+  User,
+} from "../lib/types.ts";
 
 let db: Database;
 
@@ -101,6 +109,85 @@ function runMigrations(): void {
   db.exec(
     `CREATE INDEX IF NOT EXISTS idx_kv_namespace ON kv_store(user_id, namespace)`,
   );
+
+  // Migration: Add blob quota columns to users table
+  try {
+    db.exec(
+      `ALTER TABLE users ADD COLUMN quota_max_blob_storage INTEGER DEFAULT 5368709120`,
+    ); // 5 GB
+  } catch {
+    // Column already exists
+  }
+  try {
+    db.exec(
+      `ALTER TABLE users ADD COLUMN quota_max_blob_size INTEGER DEFAULT 1073741824`,
+    ); // 1 GB
+  } catch {
+    // Column already exists
+  }
+
+  // Migration: Add blob tables
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS blobs (
+      hash TEXT PRIMARY KEY,
+      size INTEGER NOT NULL,
+      mime_type TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      released_at TEXT
+    )
+  `);
+  db.exec(
+    `CREATE INDEX IF NOT EXISTS idx_blobs_released ON blobs(released_at) WHERE released_at IS NOT NULL`,
+  );
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS blob_claims (
+      blob_hash TEXT NOT NULL REFERENCES blobs(hash) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      claimed_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (blob_hash, user_id)
+    )
+  `);
+  db.exec(
+    `CREATE INDEX IF NOT EXISTS idx_blob_claims_user ON blob_claims(user_id)`,
+  );
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS document_blob_claims (
+      blob_hash TEXT NOT NULL REFERENCES blobs(hash) ON DELETE CASCADE,
+      document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+      owner_id TEXT NOT NULL REFERENCES users(id),
+      claimed_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (blob_hash, document_id)
+    )
+  `);
+  db.exec(
+    `CREATE INDEX IF NOT EXISTS idx_document_blob_claims_owner ON document_blob_claims(owner_id)`,
+  );
+  db.exec(
+    `CREATE INDEX IF NOT EXISTS idx_document_blob_claims_document ON document_blob_claims(document_id)`,
+  );
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS blob_uploads (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      expected_hash TEXT,
+      expected_size INTEGER NOT NULL,
+      mime_type TEXT NOT NULL,
+      chunk_size INTEGER NOT NULL,
+      chunks_received INTEGER DEFAULT 0,
+      total_chunks INTEGER NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      expires_at TEXT NOT NULL
+    )
+  `);
+  db.exec(
+    `CREATE INDEX IF NOT EXISTS idx_blob_uploads_user ON blob_uploads(user_id)`,
+  );
+  db.exec(
+    `CREATE INDEX IF NOT EXISTS idx_blob_uploads_expires ON blob_uploads(expires_at)`,
+  );
 }
 
 // User operations
@@ -133,6 +220,65 @@ export function getUser(id: string): User | null {
   return row ? rowToUser(row) : null;
 }
 
+export function updateUser(
+  id: string,
+  updates: Partial<{
+    email: string | null;
+    name: string | null;
+    quotaMaxDocuments: number;
+    quotaMaxDocumentSize: number;
+    quotaMaxTotalStorage: number;
+    quotaMaxBlobStorage: number;
+    quotaMaxBlobSize: number;
+  }>,
+): User | null {
+  const fields: string[] = [];
+  const values: (string | number | null)[] = [];
+
+  if (updates.email !== undefined) {
+    fields.push("email = ?");
+    values.push(updates.email);
+  }
+  if (updates.name !== undefined) {
+    fields.push("name = ?");
+    values.push(updates.name);
+  }
+  if (updates.quotaMaxDocuments !== undefined) {
+    fields.push("quota_max_documents = ?");
+    values.push(updates.quotaMaxDocuments);
+  }
+  if (updates.quotaMaxDocumentSize !== undefined) {
+    fields.push("quota_max_document_size = ?");
+    values.push(updates.quotaMaxDocumentSize);
+  }
+  if (updates.quotaMaxTotalStorage !== undefined) {
+    fields.push("quota_max_total_storage = ?");
+    values.push(updates.quotaMaxTotalStorage);
+  }
+  if (updates.quotaMaxBlobStorage !== undefined) {
+    fields.push("quota_max_blob_storage = ?");
+    values.push(updates.quotaMaxBlobStorage);
+  }
+  if (updates.quotaMaxBlobSize !== undefined) {
+    fields.push("quota_max_blob_size = ?");
+    values.push(updates.quotaMaxBlobSize);
+  }
+
+  if (fields.length === 0) {
+    return getUser(id);
+  }
+
+  fields.push("updated_at = datetime('now')");
+  values.push(id);
+
+  const stmt = getDb().prepare(`
+    UPDATE users SET ${fields.join(", ")} WHERE id = ? RETURNING *
+  `);
+
+  const row = stmt.get(...values) as Record<string, unknown> | undefined;
+  return row ? rowToUser(row) : null;
+}
+
 function rowToUser(row: Record<string, unknown>): User {
   return {
     id: row.id as string,
@@ -141,6 +287,8 @@ function rowToUser(row: Record<string, unknown>): User {
     quotaMaxDocuments: row.quota_max_documents as number,
     quotaMaxDocumentSize: row.quota_max_document_size as number,
     quotaMaxTotalStorage: row.quota_max_total_storage as number,
+    quotaMaxBlobStorage: (row.quota_max_blob_storage as number) ?? 5368709120,
+    quotaMaxBlobSize: (row.quota_max_blob_size as number) ?? 1073741824,
     createdAt: new Date(row.created_at as string),
     updatedAt: new Date(row.updated_at as string),
   };
@@ -371,4 +519,354 @@ export function kvList(userId: string, namespace: string): KVEntry[] {
     createdAt: new Date(row.created_at as string),
     updatedAt: new Date(row.updated_at as string),
   }));
+}
+
+// Blob operations
+function rowToBlob(row: Record<string, unknown>): BlobMetadata {
+  return {
+    hash: row.hash as string,
+    size: row.size as number,
+    mimeType: row.mime_type as string,
+    createdAt: new Date(row.created_at as string),
+    releasedAt: row.released_at ? new Date(row.released_at as string) : null,
+  };
+}
+
+export function createBlob(blob: {
+  hash: string;
+  size: number;
+  mimeType: string;
+}): BlobMetadata {
+  const stmt = getDb().prepare(`
+    INSERT INTO blobs (hash, size, mime_type)
+    VALUES (?, ?, ?)
+    RETURNING *
+  `);
+  const row = stmt.get(blob.hash, blob.size, blob.mimeType) as Record<
+    string,
+    unknown
+  >;
+  return rowToBlob(row);
+}
+
+export function getBlob(hash: string): BlobMetadata | null {
+  const stmt = getDb().prepare("SELECT * FROM blobs WHERE hash = ?");
+  const row = stmt.get(hash) as Record<string, unknown> | undefined;
+  return row ? rowToBlob(row) : null;
+}
+
+export function deleteBlob(hash: string): boolean {
+  const stmt = getDb().prepare("DELETE FROM blobs WHERE hash = ?");
+  const result = stmt.run(hash);
+  return result.changes > 0;
+}
+
+export function setBlobReleased(hash: string, released: boolean): void {
+  const stmt = getDb().prepare(`
+    UPDATE blobs SET released_at = ?
+    WHERE hash = ?
+  `);
+  stmt.run(released ? new Date().toISOString() : null, hash);
+}
+
+export function getReleasedBlobs(olderThan: Date): BlobMetadata[] {
+  const stmt = getDb().prepare(`
+    SELECT * FROM blobs
+    WHERE released_at IS NOT NULL
+    AND datetime(released_at) < datetime(?)
+  `);
+  const rows = stmt.all(olderThan.toISOString()) as Record<string, unknown>[];
+  return rows.map(rowToBlob);
+}
+
+// Blob claim operations
+export function createBlobClaim(blobHash: string, userId: string): BlobClaim {
+  // First, clear released_at since the blob now has a claimer
+  setBlobReleased(blobHash, false);
+
+  const stmt = getDb().prepare(`
+    INSERT INTO blob_claims (blob_hash, user_id)
+    VALUES (?, ?)
+    ON CONFLICT(blob_hash, user_id) DO UPDATE SET claimed_at = claimed_at
+    RETURNING *
+  `);
+  const row = stmt.get(blobHash, userId) as Record<string, unknown>;
+  return {
+    blobHash: row.blob_hash as string,
+    userId: row.user_id as string,
+    claimedAt: new Date(row.claimed_at as string),
+  };
+}
+
+export function getBlobClaim(
+  blobHash: string,
+  userId: string,
+): BlobClaim | null {
+  const stmt = getDb().prepare(
+    "SELECT * FROM blob_claims WHERE blob_hash = ? AND user_id = ?",
+  );
+  const row = stmt.get(blobHash, userId) as Record<string, unknown> | undefined;
+  if (!row) return null;
+  return {
+    blobHash: row.blob_hash as string,
+    userId: row.user_id as string,
+    claimedAt: new Date(row.claimed_at as string),
+  };
+}
+
+export function deleteBlobClaim(blobHash: string, userId: string): boolean {
+  const stmt = getDb().prepare(
+    "DELETE FROM blob_claims WHERE blob_hash = ? AND user_id = ?",
+  );
+  const result = stmt.run(blobHash, userId);
+
+  if (result.changes > 0) {
+    // Check if blob has any remaining claims
+    updateBlobReleasedStatus(blobHash);
+  }
+
+  return result.changes > 0;
+}
+
+export function getUserBlobClaims(userId: string): BlobClaim[] {
+  const stmt = getDb().prepare(
+    "SELECT * FROM blob_claims WHERE user_id = ? ORDER BY claimed_at DESC",
+  );
+  const rows = stmt.all(userId) as Record<string, unknown>[];
+  return rows.map((row) => ({
+    blobHash: row.blob_hash as string,
+    userId: row.user_id as string,
+    claimedAt: new Date(row.claimed_at as string),
+  }));
+}
+
+export function getBlobClaimCount(blobHash: string): number {
+  const userClaimsStmt = getDb().prepare(
+    "SELECT COUNT(*) as count FROM blob_claims WHERE blob_hash = ?",
+  );
+  const docClaimsStmt = getDb().prepare(
+    "SELECT COUNT(*) as count FROM document_blob_claims WHERE blob_hash = ?",
+  );
+
+  const userCount = (userClaimsStmt.get(blobHash) as { count: number }).count;
+  const docCount = (docClaimsStmt.get(blobHash) as { count: number }).count;
+
+  return userCount + docCount;
+}
+
+function updateBlobReleasedStatus(blobHash: string): void {
+  const claimCount = getBlobClaimCount(blobHash);
+  if (claimCount === 0) {
+    setBlobReleased(blobHash, true);
+  }
+}
+
+// Document blob claim operations
+export function createDocumentBlobClaim(
+  blobHash: string,
+  documentId: string,
+  ownerId: string,
+): DocumentBlobClaim {
+  // First, clear released_at since the blob now has a claimer
+  setBlobReleased(blobHash, false);
+
+  const stmt = getDb().prepare(`
+    INSERT INTO document_blob_claims (blob_hash, document_id, owner_id)
+    VALUES (?, ?, ?)
+    ON CONFLICT(blob_hash, document_id) DO UPDATE SET claimed_at = claimed_at
+    RETURNING *
+  `);
+  const row = stmt.get(blobHash, documentId, ownerId) as Record<
+    string,
+    unknown
+  >;
+  return {
+    blobHash: row.blob_hash as string,
+    documentId: row.document_id as string,
+    ownerId: row.owner_id as string,
+    claimedAt: new Date(row.claimed_at as string),
+  };
+}
+
+export function getDocumentBlobClaim(
+  blobHash: string,
+  documentId: string,
+): DocumentBlobClaim | null {
+  const stmt = getDb().prepare(
+    "SELECT * FROM document_blob_claims WHERE blob_hash = ? AND document_id = ?",
+  );
+  const row = stmt.get(blobHash, documentId) as
+    | Record<string, unknown>
+    | undefined;
+  if (!row) return null;
+  return {
+    blobHash: row.blob_hash as string,
+    documentId: row.document_id as string,
+    ownerId: row.owner_id as string,
+    claimedAt: new Date(row.claimed_at as string),
+  };
+}
+
+export function deleteDocumentBlobClaim(
+  blobHash: string,
+  documentId: string,
+): boolean {
+  const stmt = getDb().prepare(
+    "DELETE FROM document_blob_claims WHERE blob_hash = ? AND document_id = ?",
+  );
+  const result = stmt.run(blobHash, documentId);
+
+  if (result.changes > 0) {
+    // Check if blob has any remaining claims
+    updateBlobReleasedStatus(blobHash);
+  }
+
+  return result.changes > 0;
+}
+
+export function getDocumentBlobClaims(documentId: string): DocumentBlobClaim[] {
+  const stmt = getDb().prepare(
+    "SELECT * FROM document_blob_claims WHERE document_id = ? ORDER BY claimed_at DESC",
+  );
+  const rows = stmt.all(documentId) as Record<string, unknown>[];
+  return rows.map((row) => ({
+    blobHash: row.blob_hash as string,
+    documentId: row.document_id as string,
+    ownerId: row.owner_id as string,
+    claimedAt: new Date(row.claimed_at as string),
+  }));
+}
+
+// Blob quota helpers
+export function getUserBlobStorageUsed(userId: string): number {
+  // User claims
+  const userClaimsStmt = getDb().prepare(`
+    SELECT COALESCE(SUM(b.size), 0) as total
+    FROM blob_claims bc
+    JOIN blobs b ON b.hash = bc.blob_hash
+    WHERE bc.user_id = ?
+  `);
+  const userTotal = (userClaimsStmt.get(userId) as { total: number }).total;
+
+  // Document claims (for documents this user owns)
+  const docClaimsStmt = getDb().prepare(`
+    SELECT COALESCE(SUM(b.size), 0) as total
+    FROM document_blob_claims dbc
+    JOIN blobs b ON b.hash = dbc.blob_hash
+    WHERE dbc.owner_id = ?
+  `);
+  const docTotal = (docClaimsStmt.get(userId) as { total: number }).total;
+
+  return userTotal + docTotal;
+}
+
+export function getUserClaimedBlobs(
+  userId: string,
+  limit = 100,
+  offset = 0,
+): { blobs: (BlobMetadata & { claimedAt: Date })[]; total: number } {
+  const countStmt = getDb().prepare(
+    "SELECT COUNT(*) as count FROM blob_claims WHERE user_id = ?",
+  );
+  const total = (countStmt.get(userId) as { count: number }).count;
+
+  const stmt = getDb().prepare(`
+    SELECT b.*, bc.claimed_at as claim_claimed_at
+    FROM blobs b
+    JOIN blob_claims bc ON bc.blob_hash = b.hash
+    WHERE bc.user_id = ?
+    ORDER BY bc.claimed_at DESC
+    LIMIT ? OFFSET ?
+  `);
+  const rows = stmt.all(userId, limit, offset) as Record<string, unknown>[];
+
+  return {
+    blobs: rows.map((row) => ({
+      ...rowToBlob(row),
+      claimedAt: new Date(row.claim_claimed_at as string),
+    })),
+    total,
+  };
+}
+
+// Blob upload session operations
+function rowToBlobUpload(row: Record<string, unknown>): BlobUpload {
+  return {
+    id: row.id as string,
+    userId: row.user_id as string,
+    expectedHash: row.expected_hash as string | null,
+    expectedSize: row.expected_size as number,
+    mimeType: row.mime_type as string,
+    chunkSize: row.chunk_size as number,
+    chunksReceived: row.chunks_received as number,
+    totalChunks: row.total_chunks as number,
+    createdAt: new Date(row.created_at as string),
+    expiresAt: new Date(row.expires_at as string),
+  };
+}
+
+export function createBlobUpload(upload: {
+  id: string;
+  userId: string;
+  expectedHash?: string;
+  expectedSize: number;
+  mimeType: string;
+  chunkSize: number;
+  totalChunks: number;
+  expiresAt: Date;
+}): BlobUpload {
+  const stmt = getDb().prepare(`
+    INSERT INTO blob_uploads (id, user_id, expected_hash, expected_size, mime_type, chunk_size, total_chunks, expires_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    RETURNING *
+  `);
+  const row = stmt.get(
+    upload.id,
+    upload.userId,
+    upload.expectedHash ?? null,
+    upload.expectedSize,
+    upload.mimeType,
+    upload.chunkSize,
+    upload.totalChunks,
+    upload.expiresAt.toISOString(),
+  ) as Record<string, unknown>;
+  return rowToBlobUpload(row);
+}
+
+export function getBlobUpload(id: string): BlobUpload | null {
+  const stmt = getDb().prepare("SELECT * FROM blob_uploads WHERE id = ?");
+  const row = stmt.get(id) as Record<string, unknown> | undefined;
+  return row ? rowToBlobUpload(row) : null;
+}
+
+export function updateBlobUploadChunksReceived(
+  id: string,
+  chunksReceived: number,
+): void {
+  const stmt = getDb().prepare(
+    "UPDATE blob_uploads SET chunks_received = ? WHERE id = ?",
+  );
+  stmt.run(chunksReceived, id);
+}
+
+export function deleteBlobUpload(id: string): boolean {
+  const stmt = getDb().prepare("DELETE FROM blob_uploads WHERE id = ?");
+  const result = stmt.run(id);
+  return result.changes > 0;
+}
+
+export function getExpiredBlobUploads(): BlobUpload[] {
+  const stmt = getDb().prepare(
+    "SELECT * FROM blob_uploads WHERE datetime(expires_at) < datetime('now')",
+  );
+  const rows = stmt.all() as Record<string, unknown>[];
+  return rows.map(rowToBlobUpload);
+}
+
+export function getUserBlobUploads(userId: string): BlobUpload[] {
+  const stmt = getDb().prepare(
+    "SELECT * FROM blob_uploads WHERE user_id = ? ORDER BY created_at DESC",
+  );
+  const rows = stmt.all(userId) as Record<string, unknown>[];
+  return rows.map(rowToBlobUpload);
 }

@@ -5,6 +5,7 @@ import fastifyStatic from "@fastify/static";
 import websocket from "@fastify/websocket";
 import Fastify from "fastify";
 import { authRoutes } from "./api/auth.ts";
+import { blobRoutes } from "./api/blobs.ts";
 import { documentRoutes } from "./api/documents.ts";
 import { kvRoutes } from "./api/kv.ts";
 import type { Config } from "./config.ts";
@@ -20,6 +21,15 @@ export async function createServer(_config: Config) {
   const server = Fastify({
     logger: true,
   });
+
+  // Add content type parser for binary uploads
+  server.addContentTypeParser(
+    "application/octet-stream",
+    { parseAs: "buffer" },
+    (_request, payload, done) => {
+      done(null, payload);
+    },
+  );
 
   // Register plugins
   await server.register(cors, {
@@ -87,6 +97,7 @@ export async function createServer(_config: Config) {
 
   // Register API routes
   await server.register(authRoutes, { prefix: "/api/v1/auth" });
+  await server.register(blobRoutes, { prefix: "/api/v1/blobs" });
   await server.register(documentRoutes, { prefix: "/api/v1/documents" });
   await server.register(kvRoutes, { prefix: "/api/v1/kv" });
 

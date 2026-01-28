@@ -89,3 +89,58 @@ export async function checkTotalStorageQuota(
     limit: user.quotaMaxTotalStorage,
   };
 }
+
+// Blob quota checking
+
+export interface BlobQuotaChecker {
+  getUserBlobStorageUsed(userId: string): Promise<number>;
+}
+
+/**
+ * Check if adding a blob would exceed blob storage quota.
+ */
+export async function checkBlobQuota(
+  checker: BlobQuotaChecker,
+  user: User,
+  blobSize: number,
+): Promise<QuotaCheck> {
+  const current = await checker.getUserBlobStorageUsed(user.id);
+  const newTotal = current + blobSize;
+
+  if (newTotal > user.quotaMaxBlobStorage) {
+    return {
+      allowed: false,
+      quota: "maxBlobStorage",
+      current,
+      limit: user.quotaMaxBlobStorage,
+    };
+  }
+
+  return {
+    allowed: true,
+    quota: "maxBlobStorage",
+    current,
+    limit: user.quotaMaxBlobStorage,
+  };
+}
+
+/**
+ * Check if a blob size is within the user's limit.
+ */
+export function checkBlobSizeQuota(user: User, blobSize: number): QuotaCheck {
+  if (blobSize > user.quotaMaxBlobSize) {
+    return {
+      allowed: false,
+      quota: "maxBlobSize",
+      current: blobSize,
+      limit: user.quotaMaxBlobSize,
+    };
+  }
+
+  return {
+    allowed: true,
+    quota: "maxBlobSize",
+    current: blobSize,
+    limit: user.quotaMaxBlobSize,
+  };
+}
