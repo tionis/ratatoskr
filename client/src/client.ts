@@ -48,6 +48,7 @@ import type {
 
 export interface RatatoskrClientOptions {
   serverUrl: string;
+  appId?: string;
   tokenStorageKey?: string;
   /**
    * Enable offline-first support with local storage.
@@ -60,6 +61,7 @@ export interface RatatoskrClientOptions {
 
 export class RatatoskrClient {
   private serverUrl: string;
+  private appId?: string;
   private tokenStorageKey: string;
   private userStorageKey: string;
   private token: string | null = null;
@@ -70,8 +72,12 @@ export class RatatoskrClient {
   private storageAdapter: IndexedDBStorageAdapter | null = null;
   private syncCoordinator: SyncCoordinator | null = null;
 
+  userDocHandle: DocHandle<any> | null = null;
+  appDocHandle: DocHandle<any> | null = null;
+
   constructor(options: RatatoskrClientOptions) {
     this.serverUrl = options.serverUrl.replace(/\/$/, ""); // Remove trailing slash
+    this.appId = options.appId;
     this.tokenStorageKey = options.tokenStorageKey ?? "ratatoskr:token";
     this.userStorageKey = `${this.tokenStorageKey}:user`;
     this.offlineEnabled = options.enableOfflineSupport ?? true;
@@ -558,182 +564,6 @@ export class RatatoskrClient {
       this.storageAdapter.close();
       this.storageAdapter = null;
     }
-  }
-
-  // ============ KV Store Methods ============
-
-  /**
-   * Get a value from the KV store.
-   * @param namespace - Application namespace (e.g., "dev.tionis.notes")
-   * @param key - Key within the namespace
-   * @returns The value, or null if not found
-   */
-  async kvGet(namespace: string, key: string): Promise<string | null> {
-    const response = await this.fetch(
-      `/api/v1/kv/${encodeURIComponent(namespace)}/${encodeURIComponent(key)}`,
-    );
-
-    if (response.status === 404) {
-      return null;
-    }
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.message ?? "Failed to get KV value");
-    }
-
-    const data = await response.json();
-    return data.value;
-  }
-
-  /**
-   * Set a value in the KV store.
-   * @param namespace - Application namespace (e.g., "dev.tionis.notes")
-   * @param key - Key within the namespace
-   * @param value - Value to store (max 64KB)
-   */
-  async kvSet(namespace: string, key: string, value: string): Promise<void> {
-    const response = await this.fetch(
-      `/api/v1/kv/${encodeURIComponent(namespace)}/${encodeURIComponent(key)}`,
-      {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ value }),
-      },
-    );
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.message ?? "Failed to set KV value");
-    }
-  }
-
-  /**
-   * Delete a value from the KV store.
-   * @param namespace - Application namespace (e.g., "dev.tionis.notes")
-   * @param key - Key within the namespace
-   * @returns true if deleted, false if not found
-   */
-  async kvDelete(namespace: string, key: string): Promise<boolean> {
-    const response = await this.fetch(
-      `/api/v1/kv/${encodeURIComponent(namespace)}/${encodeURIComponent(key)}`,
-      {
-        method: "DELETE",
-      },
-    );
-
-    if (response.status === 404) {
-      return false;
-    }
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.message ?? "Failed to delete KV value");
-    }
-
-    return true;
-  }
-
-  /**
-   * List all entries in a namespace.
-   * @param namespace - Application namespace (e.g., "dev.tionis.notes")
-   */
-  async kvList(
-    namespace: string,
-  ): Promise<Array<{ key: string; value: string; updatedAt: string }>> {
-    const response = await this.fetch(
-      `/api/v1/kv/${encodeURIComponent(namespace)}`,
-    );
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.message ?? "Failed to list KV entries");
-    }
-
-    const data = await response.json();
-    return data.entries;
-  }
-
-  // ============ App Document Helper ============
-
-  /**
-   * Get or create an app's root document.
-   *
-   * This helper implements the common pattern where an app needs a per-user
-   * root document to store its state. On first call, it creates a new
-   * automerge document and stores its URL in the KV store. On subsequent
-   * calls, it returns the existing document.
-   *
-   * @param namespace - Application namespace (e.g., "dev.tionis.notes")
-   * @param options - Options for document creation
-   * @param options.key - KV key to store the document URL (default: "root")
-   * @param options.initialize - Function to initialize the document state
-   * @returns The document handle
-   *
-   * @example
-   * ```typescript
-   * const handle = await client.getOrCreateAppDocument("dev.tionis.notes", {
-   *   initialize: (doc) => {
-   *     doc.notes = [];
-   *     doc.settings = { theme: "light" };
-   *   }
-   * });
-   * ```
-   */
-  async getOrCreateAppDocument<T>(
-    namespace: string,
-    options: {
-      key?: string;
-      initialize?: (doc: T) => void;
-      type?: string;
-    } = {},
-  ): Promise<{ handle: DocHandle<T>; url: string; isNew: boolean }> {
-    const { key = "root", initialize, type } = options;
-
-    if (!this.repo) {
-      throw new Error("Repo not initialized. Call getRepo() first.");
-    }
-
-    // Check KV store for existing document URL
-    const existingUrl = await this.kvGet(namespace, key);
-
-    if (existingUrl) {
-      // Find existing document
-      const handle = await this.repo.find<T>(existingUrl as AnyDocumentId);
-      return { handle, url: existingUrl, isNew: false };
-    }
-
-    // Create new document
-    const handle = this.repo.create<T>();
-    const url = handle.url;
-
-    // Initialize document state if provided
-    if (initialize) {
-      handle.change((doc: T) => {
-        initialize(doc);
-      });
-    }
-
-    // Store URL in KV store
-    await this.kvSet(namespace, key, url);
-
-    // Register document with server if we have a type
-    if (type) {
-      const automergeHash = url.replace("automerge:", "");
-      try {
-        await this.createDocument({
-          id: `doc:${namespace}:${automergeHash}`,
-          automergeId: automergeHash,
-          type,
-        });
-      } catch (err) {
-        console.warn("Could not register app document with server:", err);
-      }
-    }
-
-    return { handle, url, isNew: true };
   }
 
   // ============ Blob Methods ============

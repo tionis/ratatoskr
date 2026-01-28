@@ -8,10 +8,6 @@ import {
   getBlob,
   getDocument,
   getUser,
-  kvDelete,
-  kvGet,
-  kvList,
-  kvSet,
 } from "./storage/database.ts";
 import { readDocument } from "./storage/documents.ts";
 
@@ -43,9 +39,6 @@ export async function runAdminCli(args: string[]) {
         break;
       case "blob":
         await handleBlob(action!, params);
-        break;
-      case "kv":
-        await handleKv(action!, params);
         break;
       case "help":
       case "--help":
@@ -87,11 +80,6 @@ Commands:
   blob list [limit] [offset]
   blob get <hash>
   blob delete <hash>
-
-  kv list <userId> <namespace>
-  kv get <userId> <namespace> <key>
-  kv set <userId> <namespace> <key> <value>
-  kv delete <userId> <namespace> <key>
 `);
 }
 
@@ -197,48 +185,6 @@ async function handleBlob(action: string, params: string[]) {
     }
     default:
       console.error(`Unknown blob action: ${action}`);
-      printHelp();
-  }
-}
-
-async function handleKv(action: string, params: string[]) {
-  switch (action) {
-    case "list": {
-      const [userId, namespace] = params;
-      if (!userId || !namespace)
-        throw new Error("Usage: kv list <userId> <namespace>");
-      const entries = kvList(userId, namespace);
-      console.table(entries);
-      break;
-    }
-    case "get": {
-      const [userId, namespace, key] = params;
-      if (!userId || !namespace || !key)
-        throw new Error("Usage: kv get <userId> <namespace> <key>");
-      const value = kvGet(userId, namespace, key);
-      if (value === null) console.error("Key not found");
-      else console.log(value);
-      break;
-    }
-    case "set": {
-      const [userId, namespace, key, value] = params;
-      if (!userId || !namespace || !key || value === undefined)
-        throw new Error("Usage: kv set <userId> <namespace> <key> <value>");
-      kvSet(userId, namespace, key, value);
-      console.log(`Set ${namespace}:${key} = ${value}`);
-      break;
-    }
-    case "delete": {
-      const [userId, namespace, key] = params;
-      if (!userId || !namespace || !key)
-        throw new Error("Usage: kv delete <userId> <namespace> <key>");
-      const success = kvDelete(userId, namespace, key);
-      if (success) console.log(`Deleted ${namespace}:${key}`);
-      else console.error("Key not found");
-      break;
-    }
-    default:
-      console.error(`Unknown kv action: ${action}`);
       printHelp();
   }
 }

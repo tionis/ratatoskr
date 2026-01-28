@@ -9,6 +9,7 @@ import {
   deleteDocument,
   deleteDocumentBlobClaim,
   getAccessibleDocuments,
+  getAppDocument,
   getBlob,
   getDocument,
   getDocumentACL,
@@ -19,6 +20,7 @@ import {
   getUserBlobStorageUsed,
   getUserDocumentCount,
   getUserTotalStorage,
+  setAppDocument,
   setDocumentACL,
   updateDocumentExpiration,
   updateDocumentSize,
@@ -38,6 +40,44 @@ import {
 } from "./schemas.ts";
 
 export async function documentRoutes(fastify: FastifyInstance): Promise<void> {
+  // Get/Create App Document
+  fastify.get(
+    "/app/:appId",
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const { appId } = request.params as { appId: string };
+      const userId = request.auth!.userId;
+
+      if (!/^[a-zA-Z0-9._-]+$/.test(appId)) {
+        return reply.code(400).send({
+          error: "invalid_request",
+          message: "Invalid App ID",
+        });
+      }
+
+      let docId = getAppDocument(userId, appId);
+
+      if (!docId) {
+        const repo = getRepo();
+        const handle = repo.create();
+        docId = handle.url.replace("automerge:", "");
+
+        // Create document record first
+        createDocument({
+          id: docId,
+          ownerId: userId,
+          type: `app:${appId}`,
+          automergeId: docId,
+        });
+
+        // Link in app_documents
+        setAppDocument(userId, appId, docId);
+      }
+
+      return { documentId: docId };
+    },
+  );
+
   // Create document
   fastify.post("/", { preHandler: requireAuth }, async (request, reply) => {
     const result = createDocumentSchema.safeParse(request.body);

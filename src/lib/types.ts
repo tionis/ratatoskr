@@ -43,6 +43,7 @@ export interface User {
   id: string;
   email: string | null;
   name: string | null;
+  userDocumentId: string | null;
   quotaMaxDocuments: number;
   quotaMaxDocumentSize: number;
   quotaMaxTotalStorage: number;

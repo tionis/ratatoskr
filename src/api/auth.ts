@@ -100,6 +100,7 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
         id: user.id,
         email: user.email,
         name: user.name,
+        userDocumentId: user.userDocumentId,
       });
 
       // Show confirmation page before sending credentials to opener
@@ -269,6 +270,7 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
         id: user.id,
         email: user.email,
         name: user.name,
+        userDocumentId: user.userDocumentId,
         quotas: {
           maxDocuments: user.quotaMaxDocuments,
           maxDocumentSize: user.quotaMaxDocumentSize,

@@ -24,16 +24,6 @@ Commands:
   watch <id>        Watch document changes live
   delete <id>       Delete a document
 `,
-  kv: `
-Usage:
-  ratatoskr-user kv <command> [args]
-
-Commands:
-  list <namespace>              List keys in namespace
-  get <namespace> <key>         Get value
-  set <namespace> <key> <value> Set value
-  delete <namespace> <key>      Delete value
-`,
   blob: `
 Usage:
   ratatoskr-user blob <command> [args]
@@ -78,9 +68,6 @@ async function main() {
       case "doc":
         await handleDoc(subArgs);
         break;
-      case "kv":
-        await handleKv(subArgs);
-        break;
       case "blob":
         await handleBlob(subArgs);
         break;
@@ -117,11 +104,6 @@ Commands:
   doc edit <id>         Edit document interactively
   doc watch <id>        Watch document changes live
   doc delete <id>       Delete a document
-
-  kv list <namespace>              List keys in namespace
-  kv get <namespace> <key>         Get value
-  kv set <namespace> <key> <value> Set value
-  kv delete <namespace> <key>      Delete value
 
   blob list                        List claimed blobs
   blob upload <file>               Upload a file
@@ -437,65 +419,6 @@ async function handleDoc(args: string[]) {
     }
     default:
       console.error(`Unknown doc action: ${action}`);
-  }
-}
-
-// KV Handlers
-async function handleKv(args: string[]) {
-  checkHelp(args, USAGE.kv);
-  const [action, ...params] = args;
-  switch (action) {
-    case "list": {
-      const namespace = params[0];
-      if (!namespace) throw new Error("Usage: kv list <namespace>");
-      const res = await apiCall(`/api/v1/kv/${encodeURIComponent(namespace)}`);
-      console.table(res.entries);
-      break;
-    }
-    case "get": {
-      const [namespace, key] = params;
-      if (!namespace || !key)
-        throw new Error("Usage: kv get <namespace> <key>");
-      try {
-        const res = await apiCall(
-          `/api/v1/kv/${encodeURIComponent(namespace)}/${encodeURIComponent(key)}`,
-        );
-        console.log(res.value);
-      } catch (e) {
-        console.error("Key not found");
-      }
-      break;
-    }
-    case "set": {
-      const [namespace, key, value] = params;
-      if (!namespace || !key || value === undefined)
-        throw new Error("Usage: kv set <namespace> <key> <value>");
-      await apiCall(
-        `/api/v1/kv/${encodeURIComponent(namespace)}/${encodeURIComponent(key)}`,
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ value }),
-        },
-      );
-      console.log("OK");
-      break;
-    }
-    case "delete": {
-      const [namespace, key] = params;
-      if (!namespace || !key)
-        throw new Error("Usage: kv delete <namespace> <key>");
-      await apiCall(
-        `/api/v1/kv/${encodeURIComponent(namespace)}/${encodeURIComponent(key)}`,
-        {
-          method: "DELETE",
-        },
-      );
-      console.log("OK");
-      break;
-    }
-    default:
-      console.error(`Unknown kv action: ${action}`);
   }
 }
 

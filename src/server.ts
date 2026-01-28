@@ -7,7 +7,6 @@ import Fastify from "fastify";
 import { authRoutes } from "./api/auth.ts";
 import { blobRoutes } from "./api/blobs.ts";
 import { documentRoutes } from "./api/documents.ts";
-import { kvRoutes } from "./api/kv.ts";
 import type { Config } from "./config.ts";
 import { startCleanupJob } from "./lib/cleanup.ts";
 import {
@@ -99,7 +98,6 @@ export async function createServer(_config: Config) {
   await server.register(authRoutes, { prefix: "/api/v1/auth" });
   await server.register(blobRoutes, { prefix: "/api/v1/blobs" });
   await server.register(documentRoutes, { prefix: "/api/v1/documents" });
-  await server.register(kvRoutes, { prefix: "/api/v1/kv" });
 
   // WebSocket sync endpoint
   server.register(async (fastify) => {

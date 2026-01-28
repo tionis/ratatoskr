@@ -21,6 +21,7 @@ import { checkRateLimit } from "../lib/rate-limit.ts";
 import { getDocumentByAutomergeId } from "../storage/database.ts";
 import { ephemeralManager, isEphemeralId } from "./ephemeral.ts";
 import { canReadDocument } from "./permissions.ts";
+import { userManager } from "./user-manager.ts";
 
 interface AuthenticatedClient {
   peerId: PeerId;
@@ -223,6 +224,16 @@ export class ServerNetworkAdapter extends NetworkAdapter {
               user: userId ? { id: userId } : null,
             }),
           );
+
+          // Ensure User Document exists and is synced
+          if (userId) {
+            userManager.ensureUserDocument(userId).catch((err) => {
+              console.error(
+                `Failed to ensure user document for ${userId}:`,
+                err,
+              );
+            });
+          }
 
           // Announce new peer to the repo
           this.emit("peer-candidate", {

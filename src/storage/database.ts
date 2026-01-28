@@ -38,6 +38,7 @@ function runMigrations(): void {
       id TEXT PRIMARY KEY,
       email TEXT,
       name TEXT,
+      user_document_id TEXT,
       quota_max_documents INTEGER DEFAULT 10000,
       quota_max_document_size INTEGER DEFAULT 10485760,
       quota_max_total_storage INTEGER DEFAULT 1073741824,
@@ -94,21 +95,29 @@ function runMigrations(): void {
     // Column already exists, ignore
   }
 
-  // Migration: Add KV store table
+  // Migration: Add user_document_id column to users table
+  try {
+    db.exec(`ALTER TABLE users ADD COLUMN user_document_id TEXT`);
+  } catch {
+    // Column already exists
+  }
+
+  // Migration: Add app_documents table
   db.exec(`
-    CREATE TABLE IF NOT EXISTS kv_store (
+    CREATE TABLE IF NOT EXISTS app_documents (
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      namespace TEXT NOT NULL,
-      key TEXT NOT NULL,
-      value TEXT NOT NULL,
+      app_id TEXT NOT NULL,
+      document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-      PRIMARY KEY (user_id, namespace, key)
+      PRIMARY KEY (user_id, app_id)
     )
   `);
   db.exec(
-    `CREATE INDEX IF NOT EXISTS idx_kv_namespace ON kv_store(user_id, namespace)`,
+    `CREATE INDEX IF NOT EXISTS idx_app_documents_user ON app_documents(user_id)`,
   );
+
+  // Migration: Drop KV store table (deprecated)
+  db.exec(`DROP TABLE IF EXISTS kv_store`);
 
   // Migration: Add blob quota columns to users table
   try {
@@ -225,6 +234,7 @@ export function updateUser(
   updates: Partial<{
     email: string | null;
     name: string | null;
+    userDocumentId: string | null;
     quotaMaxDocuments: number;
     quotaMaxDocumentSize: number;
     quotaMaxTotalStorage: number;
@@ -242,6 +252,10 @@ export function updateUser(
   if (updates.name !== undefined) {
     fields.push("name = ?");
     values.push(updates.name);
+  }
+  if (updates.userDocumentId !== undefined) {
+    fields.push("user_document_id = ?");
+    values.push(updates.userDocumentId);
   }
   if (updates.quotaMaxDocuments !== undefined) {
     fields.push("quota_max_documents = ?");
@@ -290,6 +304,7 @@ function rowToUser(row: Record<string, unknown>): User {
     id: row.id as string,
     email: row.email as string | null,
     name: row.name as string | null,
+    userDocumentId: (row.user_document_id as string) || null,
     quotaMaxDocuments: row.quota_max_documents as number,
     quotaMaxDocumentSize: row.quota_max_document_size as number,
     quotaMaxTotalStorage: row.quota_max_total_storage as number,
@@ -470,67 +485,27 @@ export function deleteExpiredTokens(): number {
   return result.changes;
 }
 
-// KV Store operations
-export interface KVEntry {
-  namespace: string;
-  key: string;
-  value: string;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-export function kvGet(
+// App Document operations
+export function setAppDocument(
   userId: string,
-  namespace: string,
-  key: string,
-): string | null {
-  const stmt = getDb().prepare(
-    "SELECT value FROM kv_store WHERE user_id = ? AND namespace = ? AND key = ?",
-  );
-  const row = stmt.get(userId, namespace, key) as { value: string } | undefined;
-  return row?.value ?? null;
-}
-
-export function kvSet(
-  userId: string,
-  namespace: string,
-  key: string,
-  value: string,
+  appId: string,
+  documentId: string,
 ): void {
   const stmt = getDb().prepare(`
-    INSERT INTO kv_store (user_id, namespace, key, value)
-    VALUES (?, ?, ?, ?)
-    ON CONFLICT(user_id, namespace, key) DO UPDATE SET
-      value = excluded.value,
-      updated_at = datetime('now')
+    INSERT INTO app_documents (user_id, app_id, document_id)
+    VALUES (?, ?, ?)
+    ON CONFLICT(user_id, app_id) DO UPDATE SET
+      document_id = excluded.document_id
   `);
-  stmt.run(userId, namespace, key, value);
+  stmt.run(userId, appId, documentId);
 }
 
-export function kvDelete(
-  userId: string,
-  namespace: string,
-  key: string,
-): boolean {
+export function getAppDocument(userId: string, appId: string): string | null {
   const stmt = getDb().prepare(
-    "DELETE FROM kv_store WHERE user_id = ? AND namespace = ? AND key = ?",
+    "SELECT document_id FROM app_documents WHERE user_id = ? AND app_id = ?",
   );
-  const result = stmt.run(userId, namespace, key);
-  return result.changes > 0;
-}
-
-export function kvList(userId: string, namespace: string): KVEntry[] {
-  const stmt = getDb().prepare(
-    "SELECT namespace, key, value, created_at, updated_at FROM kv_store WHERE user_id = ? AND namespace = ?",
-  );
-  const rows = stmt.all(userId, namespace) as Record<string, unknown>[];
-  return rows.map((row) => ({
-    namespace: row.namespace as string,
-    key: row.key as string,
-    value: row.value as string,
-    createdAt: new Date(row.created_at as string),
-    updatedAt: new Date(row.updated_at as string),
-  }));
+  const row = stmt.get(userId, appId) as { document_id: string } | undefined;
+  return row?.document_id ?? null;
 }
 
 // Blob operations
