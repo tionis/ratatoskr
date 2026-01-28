@@ -1,6 +1,13 @@
 #!/usr/bin/env bun
-import { homedir } from "node:os";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import {
+  type AnyDocumentId,
+  type DocHandle,
+  Repo,
+} from "@automerge/automerge-repo";
+import { RatatoskrNetworkAdapter } from "./lib/cli-network-adapter.ts";
 
 const CONFIG_PATH = join(homedir(), ".ratatoskr-cli.json");
 
@@ -65,6 +72,8 @@ Commands:
   doc list              List documents
   doc get <id>          Get document metadata
   doc create [type]     Create a new document
+  doc edit <id>         Edit document interactively
+  doc watch <id>        Watch document changes live
   doc delete <id>       Delete a document
 
   kv list <namespace>              List keys in namespace
@@ -79,9 +88,37 @@ Commands:
 `);
 }
 
+async function loadConfig(): Promise<Config> {
+  const file = Bun.file(CONFIG_PATH);
+  if (!(await file.exists())) {
+    throw new Error("Not logged in. Run 'login <url> <token>' first.");
+  }
+  return await file.json();
+}
+
 async function saveConfig(config: Config) {
   await Bun.write(CONFIG_PATH, JSON.stringify(config, null, 2));
   console.log(`Configuration saved to ${CONFIG_PATH}`);
+}
+
+async function getRepo(config: Config): Promise<Repo> {
+  const adapter = new RatatoskrNetworkAdapter({
+    serverUrl: config.url,
+    token: config.token,
+    onAuthError: (msg) => {
+      console.error("Auth error:", msg);
+      process.exit(1);
+    },
+  });
+
+  const repo = new Repo({
+    network: [adapter],
+  });
+
+  // Wait for connection
+  await adapter.whenReady();
+
+  return repo;
 }
 
 // API Client
@@ -91,12 +128,7 @@ async function apiCall<T = any>(
 ): Promise<T> {
   let config: Config;
   try {
-    const file = Bun.file(CONFIG_PATH);
-    if (await file.exists()) {
-      config = await file.json();
-    } else {
-      throw new Error("No config");
-    }
+    config = await loadConfig();
   } catch (e) {
     throw new Error("Not logged in. Run 'login <url> <token>' first.");
   }
@@ -194,10 +226,6 @@ async function handleDoc(args: string[]) {
     case "create": {
       const type = params[0];
 
-      // We need to generate an ID if the server requires it.
-      // src/storage/documents.ts: createDocument takes id.
-      // src/api/documents.ts: POST / -> schema?
-      // Usually client generates ID. Let's gen a random UUID-based one for now.
       const id = `doc:${crypto.randomUUID()}`;
       const automergeId = id.replace("doc:", "");
 
@@ -214,6 +242,82 @@ async function handleDoc(args: string[]) {
       });
       console.log("Document created:");
       console.table([doc]);
+      break;
+    }
+    case "edit": {
+      const id = params[0];
+      if (!id) throw new Error("Missing ID");
+      const config = await loadConfig();
+      const repo = await getRepo(config);
+      const handle = (await repo.find(
+        id as AnyDocumentId,
+      )) as DocHandle<unknown>;
+
+      console.log("Syncing...");
+      await handle.whenReady();
+
+      const doc = await handle.doc();
+      const content = JSON.stringify(doc, null, 2);
+
+      const tmpDir = mkdtempSync(join(tmpdir(), "ratatoskr-"));
+      const tmpFile = join(tmpDir, "doc.json");
+      writeFileSync(tmpFile, content);
+
+      const editor = process.env.EDITOR || "nano";
+      console.log(`Opening ${editor}...`);
+
+      const proc = Bun.spawnSync([editor, tmpFile], {
+        stdio: ["inherit", "inherit", "inherit"],
+      });
+
+      if (proc.exitCode !== 0) {
+        console.error("Editor exited with error");
+      } else {
+        const newContentStr = readFileSync(tmpFile, "utf-8");
+        try {
+          const newContent = JSON.parse(newContentStr);
+          handle.change((d: any) => {
+            // Simple replace strategy
+            for (const key in d) delete d[key];
+            Object.assign(d, newContent);
+          });
+          // Wait for sync to happen (best effort)
+          await new Promise((r) => setTimeout(r, 500));
+          console.log("Document updated.");
+        } catch (e) {
+          console.error("Failed to parse JSON:", e);
+        }
+      }
+
+      rmSync(tmpDir, { recursive: true, force: true });
+      process.exit(0);
+      break;
+    }
+    case "watch": {
+      const id = params[0];
+      if (!id) throw new Error("Missing ID");
+      const config = await loadConfig();
+      const repo = await getRepo(config);
+      const handle = (await repo.find(
+        id as AnyDocumentId,
+      )) as DocHandle<unknown>;
+
+      console.log("Watching document... (Ctrl+C to stop)");
+      await handle.whenReady();
+
+      const printDoc = async () => {
+        const doc = await handle.doc();
+        console.clear();
+        console.log(`Document: ${id}`);
+        console.log("-------------------");
+        console.log(JSON.stringify(doc, null, 2));
+      };
+
+      printDoc();
+      handle.on("change", printDoc);
+
+      // Keep alive
+      await new Promise(() => {});
       break;
     }
     case "delete": {

@@ -105,6 +105,12 @@ ratatoskr-user doc create <type>
 # Get document metadata
 ratatoskr-user doc get <doc_id>
 
+# Edit a document (opens $EDITOR)
+ratatoskr-user doc edit <doc_id>
+
+# Watch a document live
+ratatoskr-user doc watch <doc_id>
+
 # Delete a document (if owner)
 ratatoskr-user doc delete <doc_id>
 ```
