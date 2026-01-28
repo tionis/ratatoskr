@@ -11,9 +11,10 @@ Ratatoskr is an automerge-repo sync server with authentication and per-document 
 - **Offline-first client**: Create and edit documents offline, auto-sync when back online
 - **Blob storage**: Content-addressable file storage with chunked uploads and deduplication
 - **Multiple document types**:
-  - `doc:` - Regular documents with full ACL support
-  - `app:` - Per-user-per-app private documents
-  - `eph:` - Ephemeral relay documents for temporary collaboration
+  - **Standard**: Regular persistent documents with full ACL support (Base58 IDs)
+  - **User Doc**: Special per-user document containing profile and doc lists
+  - **App Doc**: Per-user-per-app root document (replaces KV store)
+  - **Ephemeral**: Relay documents for temporary collaboration
 - **Rate limiting**: Protection against abuse for anonymous users
 - **Quotas**: Per-user limits on document count, size, blob storage, and total storage
 
@@ -164,8 +165,7 @@ await client.login();
 const repo = client.getRepo();
 
 // Create a document (type is optional)
-await client.createDocument({
-  id: 'doc:my-document',
+const { id } = await client.createDocument({
   type: 'notes',
 });
 
@@ -173,16 +173,16 @@ await client.createDocument({
 const { owned, accessible } = await client.listDocuments();
 
 // Manage ACLs
-await client.setDocumentACL('doc:my-document', [
+await client.setDocumentACL(id, [
   { principal: 'other-user', permission: 'read' },
   { principal: 'public', permission: 'read' },
 ]);
 
 // API tokens
-const { token, id } = await client.createApiToken('my-cli-tool', ['read', 'write']);
+const { token, id: tokenId } = await client.createApiToken('my-cli-tool', ['read', 'write']);
 
 // Real-time sync via automerge-repo
-const handle = repo.find('doc:my-document');
+const handle = repo.find(id);
 ```
 
 See [client/README.md](client/README.md) for full documentation.

@@ -54,17 +54,6 @@ ratatoskr blob get <hash>
 ratatoskr blob delete <hash>
 ```
 
-#### KV Store Management
-```bash
-# List keys for a user/namespace
-ratatoskr kv list <user_id> <namespace>
-
-# Get/Set/Delete values
-ratatoskr kv get <user_id> <namespace> <key>
-ratatoskr kv set <user_id> <namespace> <key> <value>
-ratatoskr kv delete <user_id> <namespace> <key>
-```
-
 ---
 
 ## User CLI (Client Script)
@@ -128,12 +117,4 @@ ratatoskr-user blob download <hash> [output_filename]
 
 # Release claim on a blob
 ratatoskr-user blob delete <hash>
-```
-
-#### KV Store
-```bash
-# Manage key-value data
-ratatoskr-user kv set <namespace> <key> <value>
-ratatoskr-user kv get <namespace> <key>
-ratatoskr-user kv list <namespace>
 ```
