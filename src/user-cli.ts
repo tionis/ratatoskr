@@ -268,10 +268,15 @@ async function handleDoc(args: string[]) {
     case "edit": {
       const id = params[0];
       if (!id) throw new Error("Missing ID");
+
+      const automergeUrl = id.startsWith("doc:")
+        ? id.replace(/^doc:/, "automerge:")
+        : id;
+
       const config = await loadConfig();
       const repo = await getRepo(config);
       const handle = (await repo.find(
-        id as AnyDocumentId,
+        automergeUrl as AnyDocumentId,
       )) as DocHandle<unknown>;
 
       console.log("Syncing...");
@@ -317,13 +322,19 @@ async function handleDoc(args: string[]) {
     case "watch": {
       const id = params[0];
       if (!id) throw new Error("Missing ID");
+
+      const automergeUrl = id.startsWith("doc:")
+        ? id.replace(/^doc:/, "automerge:")
+        : id;
+
       const config = await loadConfig();
       const repo = await getRepo(config);
       const handle = (await repo.find(
-        id as AnyDocumentId,
+        automergeUrl as AnyDocumentId,
       )) as DocHandle<unknown>;
 
       console.log("Watching document... (Ctrl+C to stop)");
+
       await handle.whenReady();
 
       const printDoc = async () => {
