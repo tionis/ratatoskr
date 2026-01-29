@@ -237,7 +237,7 @@
       <p>The fastest way to get started is with a direct ESM import from this server (no build step required):</p>
 
       <pre><code class="language-html">&lt;script type="module"&gt;
-import { RatatoskrClient } from '{{SERVER_URL}}/ui/lib/ratatoskr-client.js';
+import { RatatoskrClient } from '{{SERVER_URL}}/ratatoskr-client.js';
 
 const client = new RatatoskrClient({
   serverUrl: '{{SERVER_URL}}'
@@ -251,10 +251,10 @@ console.log('Logged in as:', user.name);
 const repo = client.getRepo();
 
 // Create a document
-await client.createDocument({
-  id: `doc:${crypto.randomUUID()}`,
-  type: 'notes'
+const { id } = await client.createDocument({
+  type: 'notes' // Optional type
 });
+console.log('Created document:', id);
 
 // List your documents
 const { owned, accessible } = await client.listDocuments();
@@ -267,7 +267,7 @@ console.log('My documents:', owned);
 
       <h3>Option 1: Direct ESM Import (Recommended for HTML tools)</h3>
       <p>No installation needed. Import directly from this server:</p>
-      <pre><code class="language-javascript">import { RatatoskrClient } from '{{SERVER_URL}}/ui/lib/ratatoskr-client.js';</code></pre>
+      <pre><code class="language-javascript">import { RatatoskrClient } from '{{SERVER_URL}}/ratatoskr-client.js';</code></pre>
       <p>This bundle includes all dependencies (including automerge) so there's nothing else to install.</p>
 
       <h3>Option 2: npm/bun/yarn</h3>
@@ -371,11 +371,11 @@ console.log('My documents:', owned);
       <pre><code class="language-javascript">const repo = client.getRepo();
 
 // Find an existing document
-const handle = repo.find('doc:abc123');
+const handle = repo.find('2k5...'); // Use standard Automerge ID
 await handle.whenReady();
 const doc = handle.docSync();
 
-// Create a new document
+// Create a new document locally
 const newHandle = repo.create();
 newHandle.change(doc =&gt; {
   doc.title = 'My Document';
@@ -390,7 +390,6 @@ newHandle.change(doc =&gt; {
       <h4><code>createDocument(request): Promise&lt;DocumentMetadata&gt;</code></h4>
       <p>Create a new document on the server.</p>
       <pre><code class="language-javascript">const doc = await client.createDocument({
-  id: 'doc:my-unique-id',      // Required
   type: 'notes',                // Optional
   acl: [                        // Optional
     { principal: 'bob', permission: 'write' },
@@ -399,12 +398,12 @@ newHandle.change(doc =&gt; {
   expiresAt: '2025-12-31'       // Optional
 });</code></pre>
 
-      <p><strong>Document ID Prefixes:</strong></p>
+      <p><strong>Document ID Types:</strong></p>
       <table>
-        <tr><th>Prefix</th><th>Example</th><th>Description</th></tr>
-        <tr><td><code>doc:</code></td><td><code>doc:abc123</code></td><td>Regular document with full ACL support</td></tr>
-        <tr><td><code>app:</code></td><td><code>app:myapp</code></td><td>Per-user-per-app private document</td></tr>
-        <tr><td><code>eph:</code></td><td><code>eph:session</code></td><td>Ephemeral document (no persistence)</td></tr>
+        <tr><th>Type</th><th>Format</th><th>Description</th></tr>
+        <tr><td><strong>Standard</strong></td><td>Base58 (e.g. <code>2k5...</code>)</td><td>Regular persistent document with full ACL support. Default type.</td></tr>
+        <tr><td><strong>App Doc</strong></td><td>Base58</td><td>Private per-app root document. Managed via <code>appId</code>.</td></tr>
+        <tr><td><strong>Ephemeral</strong></td><td><code>eph:&lt;id&gt;</code></td><td>Relay-only document for temporary sessions. No persistence.</td></tr>
       </table>
 
       <h4><code>listDocuments(): Promise&lt;ListDocumentsResponse&gt;</code></h4>
@@ -415,23 +414,23 @@ console.log('Shared with me:', accessible);</code></pre>
 
       <h4><code>getDocument(id): Promise&lt;DocumentMetadata&gt;</code></h4>
       <p>Get metadata for a specific document.</p>
-      <pre><code class="language-javascript">const doc = await client.getDocument('doc:abc123');
+      <pre><code class="language-javascript">const doc = await client.getDocument('2k5...');
 console.log('Owner:', doc.owner, 'Size:', doc.size);</code></pre>
 
       <h4><code>deleteDocument(id): Promise&lt;void&gt;</code></h4>
       <p>Delete a document (owner only).</p>
-      <pre><code class="language-javascript">await client.deleteDocument('doc:abc123');</code></pre>
+      <pre><code class="language-javascript">await client.deleteDocument('2k5...');</code></pre>
 
       <h3>Access Control</h3>
 
       <h4><code>getDocumentACL(id): Promise&lt;ACLEntry[]&gt;</code></h4>
       <p>Get the access control list for a document.</p>
-      <pre><code class="language-javascript">const acl = await client.getDocumentACL('doc:abc123');
+      <pre><code class="language-javascript">const acl = await client.getDocumentACL('2k5...');
 // [{ principal: 'bob', permission: 'write' }]</code></pre>
 
       <h4><code>setDocumentACL(id, acl): Promise&lt;void&gt;</code></h4>
       <p>Update a document's ACL (owner only).</p>
-      <pre><code class="language-javascript">await client.setDocumentACL('doc:abc123', [
+      <pre><code class="language-javascript">await client.setDocumentACL('2k5...', [
   { principal: 'bob', permission: 'write' },
   { principal: 'charlie', permission: 'read' },
   { principal: 'public', permission: 'read' }
@@ -441,7 +440,7 @@ console.log('Owner:', doc.owner, 'Size:', doc.size);</code></pre>
       <table>
         <tr><th>Principal</th><th>Description</th></tr>
         <tr><td>User ID</td><td>Grant access to specific user</td></tr>
-        <tr><td>Document ID</td><td>Inherit ACL from another document</td></tr>
+        <tr><td>Document ID</td><td>Inherit ACL from another document (Recursive ACL)</td></tr>
         <tr><td><code>"public"</code></td><td>Grant access to everyone</td></tr>
       </table>
 
@@ -624,21 +623,21 @@ console.log(`Using ${quotaUsed} of ${quotaLimit} bytes`);</code></pre>
 
       <h4><code>uploadBlobToDocument(documentId, data, options?): Promise&lt;BlobInfo&gt;</code></h4>
       <p>Upload a blob and immediately attach it to a document.</p>
-      <pre><code class="language-javascript">const blob = await client.uploadBlobToDocument('doc:my-doc', file, {
+      <pre><code class="language-javascript">const blob = await client.uploadBlobToDocument('2k5...', file, {
   onProgress: (p) => console.log(p.phase)
 });</code></pre>
 
       <h4><code>addDocumentBlobClaim(documentId, hash): Promise&lt;void&gt;</code></h4>
       <p>Attach an existing blob to a document.</p>
-      <pre><code class="language-javascript">await client.addDocumentBlobClaim('doc:my-doc', 'abc123...');</code></pre>
+      <pre><code class="language-javascript">await client.addDocumentBlobClaim('2k5...', 'abc123...');</code></pre>
 
       <h4><code>removeDocumentBlobClaim(documentId, hash): Promise&lt;void&gt;</code></h4>
       <p>Remove a blob from a document.</p>
-      <pre><code class="language-javascript">await client.removeDocumentBlobClaim('doc:my-doc', 'abc123...');</code></pre>
+      <pre><code class="language-javascript">await client.removeDocumentBlobClaim('2k5...', 'abc123...');</code></pre>
 
       <h4><code>listDocumentBlobs(documentId): Promise&lt;DocumentBlobsResponse&gt;</code></h4>
       <p>List all blobs attached to a document.</p>
-      <pre><code class="language-javascript">const { blobs, totalSize } = await client.listDocumentBlobs('doc:my-doc');
+      <pre><code class="language-javascript">const { blobs, totalSize } = await client.listDocumentBlobs('2k5...');
 console.log(`Document has ${blobs.length} blobs (${totalSize} bytes)`);</code></pre>
     </section>
 
@@ -667,7 +666,8 @@ interface ACLEntry {
 }
 
 interface CreateDocumentRequest {
-  id: string;                  // Required: doc:, app:, or eph: prefix
+  id?: string;                 // Optional: ID (if omitted, server generates one)
+  automergeId?: string;        // Optional: specific automerge ID
   type?: string;               // Optional: document type
   acl?: ACLEntry[];            // Optional: initial ACL
   expiresAt?: string;          // Optional: auto-delete date
@@ -764,7 +764,7 @@ interface SyncEvent {
   &lt;div id="output"&gt;&lt;/div&gt;
 
   &lt;script type="module"&gt;
-    import { RatatoskrClient } from '{{SERVER_URL}}/ui/lib/ratatoskr-client.js';
+    import { RatatoskrClient } from '{{SERVER_URL}}/ratatoskr-client.js';
 
     const client = new RatatoskrClient({
       serverUrl: '{{SERVER_URL}}'
@@ -791,8 +791,8 @@ interface SyncEvent {
     };
 
     document.getElementById('create').onclick = async () =&gt; {
+      // Create document (let server generate ID)
       const doc = await client.createDocument({
-        id: `doc:${crypto.randomUUID()}`,
         type: 'notes'
       });
       console.log('Created:', doc);
@@ -806,7 +806,7 @@ interface SyncEvent {
 &lt;/html&gt;</code></pre>
 
       <h3>Real-Time Collaboration with Automerge</h3>
-      <pre><code class="language-javascript">import { RatatoskrClient } from '{{SERVER_URL}}/ui/lib/ratatoskr-client.js';
+      <pre><code class="language-javascript">import { RatatoskrClient } from '{{SERVER_URL}}/ratatoskr-client.js';
 
 const client = new RatatoskrClient({
   serverUrl: '{{SERVER_URL}}'
@@ -814,15 +814,14 @@ const client = new RatatoskrClient({
 
 await client.login();
 
-// Register document on server first
-const docId = `doc:${crypto.randomUUID()}`;
-await client.createDocument({ id: docId, type: 'counter' });
+// Create document and get ID
+const { id } = await client.createDocument({ type: 'counter' });
 
 // Get automerge repo
 const repo = client.getRepo();
 
-// Create the document content
-const handle = repo.create();
+// Find the document
+const handle = repo.find(id);
 
 // Make changes that sync in real-time
 handle.change(doc =&gt; {
@@ -843,18 +842,17 @@ function increment() {
 
       <h3>Share a Document</h3>
       <pre><code class="language-javascript">// Create a document
-await client.createDocument({
-  id: 'doc:shared-notes',
+const { id } = await client.createDocument({
   type: 'notes'
 });
 
 // Share with specific user (write access)
-await client.setDocumentACL('doc:shared-notes', [
+await client.setDocumentACL(id, [
   { principal: 'bob', permission: 'write' }
 ]);
 
 // Make it publicly readable
-await client.setDocumentACL('doc:shared-notes', [
+await client.setDocumentACL(id, [
   { principal: 'bob', permission: 'write' },
   { principal: 'public', permission: 'read' }
 ]);</code></pre>
@@ -908,7 +906,7 @@ try {
 }
 
 try {
-  await client.setDocumentACL('doc:test', [...]);
+  await client.setDocumentACL('2k5...', [...]);
 } catch (err) {
   // e.g., "Not authorized" (not the owner)
   console.error('Failed to update ACL:', err.message);
