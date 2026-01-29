@@ -7,9 +7,13 @@ import { config } from "../config.ts";
  * Documents are organized by type and sharded by ID prefix.
  */
 export function getDocumentPath(documentId: string): string {
-  const [prefix, localId] = documentId.split(":");
-  if (!prefix || !localId) {
-    throw new Error(`Invalid document ID: ${documentId}`);
+  const parts = documentId.split(":");
+  let prefix = "doc";
+  let localId = documentId;
+
+  if (parts.length > 1) {
+    prefix = parts[0]!;
+    localId = parts.slice(1).join(":");
   }
 
   // Shard by first 2 characters of the local ID
