@@ -84,6 +84,23 @@ export async function createServer(_config: Config) {
     });
   }
 
+  // Serve client library at root
+  server.get("/ratatoskr-client.js", async (_request, reply) => {
+    if (hasEmbeddedFiles()) {
+      const file = getEmbeddedFile("lib/ratatoskr-client.js");
+      if (!file) {
+        return reply.status(404).send({ error: "Not found" });
+      }
+      const content = await file.arrayBuffer();
+      return reply
+        .header("Content-Type", "application/javascript; charset=utf-8")
+        .send(Buffer.from(content));
+    }
+
+    // In dev mode, use sendFile (relies on fastify-static root set to src/ui)
+    return reply.sendFile("lib/ratatoskr-client.js");
+  });
+
   // Redirect root to UI
   server.get("/", async (_request, reply) => {
     return reply.redirect("/ui/index.html");

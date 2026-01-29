@@ -134,6 +134,15 @@ The browser client library is available on npm as `ratatoskr-client`.
 npm install ratatoskr-client @automerge/automerge-repo
 ```
 
+### Self-Hosted Script
+
+```html
+<script type="module">
+import { RatatoskrClient } from '/ratatoskr-client.js';
+// ...
+</script>
+```
+
 ### Direct ESM Import (No Build Step)
 
 ```html

@@ -22,6 +22,20 @@ Browser client library for [Ratatoskr](https://github.com/tionis/ratatoskr) - an
 npm install ratatoskr-client @automerge/automerge-repo
 ```
 
+### Self-Hosted Script
+
+When running the Ratatoskr server, the client library is available at the root:
+
+```html
+<script type="module">
+  import { RatatoskrClient } from '/ratatoskr-client.js';
+  
+  const client = new RatatoskrClient({
+    serverUrl: window.location.origin
+  });
+</script>
+```
+
 ### Direct ESM Import (No Build Step)
 
 ```html
