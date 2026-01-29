@@ -55,8 +55,8 @@ function mapAutomergeIdToOurId(automergeId: string): string {
     return doc.id;
   }
 
-  // Default to doc: prefix for unrecognized IDs
-  return `doc:${automergeId}`;
+  // Default to raw ID
+  return automergeId;
 }
 
 /**

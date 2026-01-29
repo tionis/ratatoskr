@@ -69,7 +69,7 @@ export async function resolvePermissions(
     }
 
     // Check document reference (recursive ACL)
-    if (entry.principal.startsWith("doc:") && depth < MAX_ACL_DEPTH) {
+    if (depth < MAX_ACL_DEPTH) {
       const refPermissions = await resolvePermissions(
         resolver,
         entry.principal,

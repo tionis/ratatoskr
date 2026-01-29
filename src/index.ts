@@ -12,8 +12,8 @@ async function main() {
   await initDatabase(config.dataDir);
 
   // Check if the command is a CLI command or server start
-  // Known CLI categories: user, doc, blob, kv, help, --help, -h
-  const cliCommands = ["user", "doc", "blob", "kv", "help", "--help", "-h"];
+  // Known CLI categories: user, doc, blob, help, --help, -h
+  const cliCommands = ["user", "doc", "blob", "help", "--help", "-h"];
 
   if (!command || command === "server") {
     await runServer();
