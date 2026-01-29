@@ -151,7 +151,42 @@ export class RatatoskrClient {
       this.syncCoordinator.processPendingOperations();
     }
 
+    // Load special documents (User/App docs)
+    await this.initializeSpecialDocuments();
+
     return this.user;
+  }
+
+  /**
+   * Initialize handles for User and App documents.
+   */
+  private async initializeSpecialDocuments(): Promise<void> {
+    if (!this.user) return;
+
+    // Ensure repo is initialized
+    const repo = this.getRepo();
+
+    // Load User Document
+    if (this.user.userDocumentId) {
+      this.userDocHandle = repo.find(this.user.userDocumentId);
+    }
+
+    // Load App Document
+    if (this.appId) {
+      try {
+        const response = await this.fetch(
+          `/api/v1/documents/app/${encodeURIComponent(this.appId)}`,
+        );
+        if (response.ok) {
+          const { documentId } = await response.json();
+          this.appDocHandle = repo.find(documentId);
+        } else {
+          console.warn(`Failed to load App Document for ${this.appId}`);
+        }
+      } catch (err) {
+        console.warn("Error loading App Document:", err);
+      }
+    }
   }
 
   /**
@@ -224,6 +259,10 @@ export class RatatoskrClient {
     this.user = await response.json();
     // Update cached user info
     storeUser(this.userStorageKey, this.user!);
+
+    // Load special documents
+    await this.initializeSpecialDocuments();
+
     return this.user!;
   }
 
@@ -422,6 +461,21 @@ export class RatatoskrClient {
 
     const data = await response.json();
     return data.acl;
+  }
+
+  /**
+   * Create (or join) an ephemeral document.
+   * Ephemeral documents are not persisted to the database and are useful for
+   * temporary peer-to-peer signaling or collaboration.
+   *
+   * @param id - Optional ID. If not provided, a random 'eph:...' ID is generated.
+   */
+  createEphemeralDocument<T = any>(id?: string): DocHandle<T> {
+    const docId = id ?? `eph:${crypto.randomUUID()}`;
+    if (!docId.startsWith("eph:")) {
+      throw new Error("Ephemeral document IDs must start with 'eph:'");
+    }
+    return this.getRepo().find(docId);
   }
 
   // ============================================

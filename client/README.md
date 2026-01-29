@@ -174,6 +174,19 @@ Get metadata for a specific document.
 
 Delete a document (owner only).
 
+##### `createEphemeralDocument(id?): DocHandle<any>`
+
+Create (or join) an ephemeral document. Ephemeral documents are relay-only and not persisted to the database. Useful for temporary peer-to-peer signaling or collaboration sessions.
+
+```typescript
+// Create with random ID
+const handle = client.createEphemeralDocument();
+console.log('Session ID:', handle.documentId); // starts with "eph:"
+
+// Join known session
+const sessionHandle = client.createEphemeralDocument('eph:my-session-id');
+```
+
 #### Access Control
 
 ##### `getDocumentACL(id): Promise<ACLEntry[]>`

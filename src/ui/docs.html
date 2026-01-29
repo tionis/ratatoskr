@@ -320,6 +320,12 @@ console.log('My documents:', owned);
         </tr>
       </table>
 
+      <h4>Properties</h4>
+      <ul>
+        <li><code>userDocHandle</code>: Handle to the user's profile document (synced on login).</li>
+        <li><code>appDocHandle</code>: Handle to the application's root document (synced if <code>appId</code> is provided).</li>
+      </ul>
+
       <h3>Authentication Methods</h3>
 
       <h4><code>login(): Promise&lt;User&gt;</code></h4>
@@ -420,6 +426,15 @@ console.log('Owner:', doc.owner, 'Size:', doc.size);</code></pre>
       <h4><code>deleteDocument(id): Promise&lt;void&gt;</code></h4>
       <p>Delete a document (owner only).</p>
       <pre><code class="language-javascript">await client.deleteDocument('2k5...');</code></pre>
+
+      <h4><code>createEphemeralDocument(id?): DocHandle&lt;any&gt;</code></h4>
+      <p>Create (or join) an ephemeral document. These are relay-only and not persisted.</p>
+      <pre><code class="language-javascript">// Create new session
+const handle = client.createEphemeralDocument();
+console.log('Session ID:', handle.documentId); // "eph:..."
+
+// Join existing session
+const session = client.createEphemeralDocument('eph:my-session');</code></pre>
 
       <h3>Access Control</h3>
 
