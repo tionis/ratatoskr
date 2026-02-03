@@ -39,7 +39,9 @@ const toastContainer = document.getElementById("toast-container");
 
 async function initializeClient() {
   try {
-    const module = await import(`${SERVER_URL}/ui/lib/ratatoskr-client.js`);
+    const module = await import(
+      `${SERVER_URL}/ratatoskr-client.js?v=${Date.now()}`
+    );
     RatatoskrClient = module.RatatoskrClient;
     client = new RatatoskrClient({
       serverUrl: SERVER_URL,

@@ -48,9 +48,17 @@ export class RatatoskrNetworkAdapter extends NetworkAdapter {
 
   /**
    * Update the authentication token.
+   * This forces a reconnection to authenticate with the new token.
    */
   setToken(token: string): void {
+    const changed = this.token !== token;
     this.token = token;
+
+    if (changed && this.socket) {
+      // Force reconnect with new token
+      this.reconnectAttempts = 0;
+      this.socket.close(); // onclose will trigger doConnect which uses the new token
+    }
   }
 
   connect(peerId: PeerId, peerMetadata?: PeerMetadata): void {
@@ -81,6 +89,7 @@ export class RatatoskrNetworkAdapter extends NetworkAdapter {
         cbor.encode({
           type: "auth",
           token: this.token,
+          peerId: this.peerId,
         }),
       );
     };

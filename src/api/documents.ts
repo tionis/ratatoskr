@@ -31,7 +31,7 @@ import {
   readDocument,
   writeDocument,
 } from "../storage/documents.ts";
-import { getRepo } from "../sync/repo.ts";
+import { getRepo, getStorageAdapter } from "../sync/repo.ts";
 import {
   createDocumentSchema,
   updateDocumentAclSchema,
@@ -56,22 +56,52 @@ export async function documentRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       let docId = getAppDocument(userId, appId);
+      let needsCreation = !docId;
 
-      if (!docId) {
+      // If document ID exists, verify it actually exists in storage (chunks)
+      // This handles the case where metadata exists but content was lost/not saved
+      if (docId) {
+        const storage = getStorageAdapter();
+        const snapshot = await storage.load([docId]);
+        const chunks = await storage.loadRange([docId]);
+
+        if (!snapshot && chunks.length === 0) {
+          request.log.warn(
+            `App document ${docId} missing from storage, recreating...`,
+          );
+          needsCreation = true;
+          // Clean up potentially stale metadata is handled by upsert in creation logic below
+          // or we just reuse the ID if we wanted, but better to start fresh
+
+          // Actually, if we reuse the ID, we might have issues if peers have state.
+          // But since this is an "app document" likely only on this device/user, it might be safe.
+          // However, safest is to let the creation logic make a new one and update the link.
+        }
+      }
+
+      if (needsCreation) {
         const repo = getRepo();
-        const handle = repo.create();
-        docId = handle.url.replace("automerge:", "");
+        // Initialize with basic metadata to ensure it's persisted
+        const handle = repo.create({ createdAt: new Date().toISOString() });
+        const newDocId = handle.url.replace("automerge:", "");
 
-        // Create document record first
+        // Create document record first (or update if we are recovering)
+        // If we are recovering, we might want to delete the old one or just update
+        if (docId) {
+          // Delete old metadata to be clean
+          deleteDocument(docId);
+        }
+
         createDocument({
-          id: docId,
+          id: newDocId,
           ownerId: userId,
           type: `app:${appId}`,
-          automergeId: docId,
+          automergeId: newDocId,
         });
 
         // Link in app_documents
-        setAppDocument(userId, appId, docId);
+        setAppDocument(userId, appId, newDocId);
+        docId = newDocId;
       }
 
       return { documentId: docId };

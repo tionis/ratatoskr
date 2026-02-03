@@ -65,6 +65,16 @@ export function getNetworkAdapter(): ServerNetworkAdapter {
 }
 
 /**
+ * Get the storage adapter instance.
+ */
+export function getStorageAdapter(): SqliteStorageAdapter {
+  if (!storageAdapter) {
+    initRepo();
+  }
+  return storageAdapter!;
+}
+
+/**
  * Shutdown the repo.
  */
 export function shutdownRepo(): void {

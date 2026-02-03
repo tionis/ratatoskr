@@ -121,6 +121,22 @@
     userInfo.textContent = currentUser?.email || currentUser?.name || "User";
   }
 
+  function handleAuthMessage(event) {
+    if (event.data?.type === "ratatoskr:auth") {
+      window.removeEventListener("message", handleAuthMessage);
+
+      authToken = event.data.token;
+      currentUser = event.data.user;
+
+      sessionStorage.setItem("ratatoskr_token", authToken);
+      sessionStorage.setItem("ratatoskr_user", JSON.stringify(currentUser));
+
+      showDashboard();
+      loadAllData();
+      showToast("Successfully logged in", "success");
+    }
+  }
+
   function handleLogin() {
     // Open popup for OIDC login
     const width = 500;
@@ -128,30 +144,15 @@
     const left = window.screenX + (window.outerWidth - width) / 2;
     const top = window.screenY + (window.outerHeight - height) / 2;
 
+    window.removeEventListener("message", handleAuthMessage);
+
     window.open(
       "/api/v1/auth/login",
       "ratatoskr_auth",
       `width=${width},height=${height},left=${left},top=${top}`,
     );
 
-    // Listen for auth message
-    const messageHandler = (event) => {
-      if (event.data?.type === "ratatoskr:auth") {
-        window.removeEventListener("message", messageHandler);
-
-        authToken = event.data.token;
-        currentUser = event.data.user;
-
-        sessionStorage.setItem("ratatoskr_token", authToken);
-        sessionStorage.setItem("ratatoskr_user", JSON.stringify(currentUser));
-
-        showDashboard();
-        loadAllData();
-        showToast("Successfully logged in", "success");
-      }
-    };
-
-    window.addEventListener("message", messageHandler);
+    window.addEventListener("message", handleAuthMessage);
   }
 
   function handleLogout() {

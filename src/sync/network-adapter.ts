@@ -147,6 +147,7 @@ export class ServerNetworkAdapter extends NetworkAdapter {
           }
 
           const token = message.token as string | undefined;
+          const requestedPeerId = message.peerId as PeerId | undefined;
           let userId: string | null = null;
           let isAnonymous = true;
 
@@ -202,8 +203,9 @@ export class ServerNetworkAdapter extends NetworkAdapter {
             }
           }
 
-          // Generate peer ID for this client
-          const peerId = `client-${crypto.randomUUID()}` as PeerId;
+          // Use requested peer ID or generate one
+          const peerId =
+            requestedPeerId ?? (`client-${crypto.randomUUID()}` as PeerId);
 
           client = {
             peerId,
@@ -216,11 +218,11 @@ export class ServerNetworkAdapter extends NetworkAdapter {
           this.clients.set(peerId, client);
           this.socketToPeer.set(socket, peerId);
 
-          // Send auth success
+          // Send auth success with SERVER'S peerId
           socket.send(
             cbor.encode({
               type: "auth_ok",
-              peerId,
+              peerId: this.peerId, // Send server's peer ID
               user: userId ? { id: userId } : null,
             }),
           );
@@ -346,14 +348,22 @@ export class ServerNetworkAdapter extends NetworkAdapter {
       // Check if document exists by automerge ID
       const existingDoc = getDocumentByAutomergeId(docId);
 
+      console.log(
+        `[Sync] Doc check: ${docId}, exists: ${!!existingDoc}, user: ${client.userId}`,
+      );
+
       // If document doesn't exist and user is authenticated, allow sync
       // The client will create the document metadata via API
       // This handles the race condition where sync starts before API registration
       if (!existingDoc && client.userId && !client.isAnonymous) {
         // Allow the sync to proceed - document will be registered via API
         // Skip permission check for unregistered documents from authenticated users
+        console.log(
+          `[Sync] Allowing sync for non-existent doc ${docId} (authenticated user)`,
+        );
       } else {
         const canRead = await canReadDocument(docId, client.userId);
+        console.log(`[Sync] Permission check for ${docId}: ${canRead}`);
 
         if (!canRead) {
           client.socket.send(

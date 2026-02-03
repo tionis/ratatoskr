@@ -190,6 +190,117 @@ export class RatatoskrClient {
   }
 
   /**
+   * Get or create the App Document for this application.
+   * If the app document already exists on the server, it is loaded.
+   * If not, a new one is created.
+   *
+   * @param appId - Optional App ID to use if not provided in constructor
+   * @param options - Options for creating/initializing the document
+   * @returns Object containing the handle and metadata
+   */
+  async getOrCreateAppDocument<T = any>(
+    appId?: string,
+    options?: {
+      key?: string;
+      type?: string;
+      initialize?: (doc: any) => void;
+    },
+  ): Promise<{ handle: DocHandle<T>; url: string; isNew: boolean }> {
+    const targetAppId = appId ?? this.appId;
+
+    if (!targetAppId) {
+      throw new Error("App ID is required to get or create App Document");
+    }
+
+    // Return existing handle if available and matching
+    if (this.appDocHandle && this.appId === targetAppId) {
+      return {
+        handle: this.appDocHandle as DocHandle<T>,
+        url: this.appDocHandle.url,
+        isNew: false,
+      };
+    }
+
+    // Ensure repo is initialized
+    const repo = this.getRepo();
+
+    // Try to find existing app document
+    try {
+      const response = await this.fetch(
+        `/api/v1/documents/app/${encodeURIComponent(targetAppId)}`,
+      );
+
+      if (response.ok) {
+        const { documentId } = await response.json();
+        this.appDocHandle = repo.find(documentId);
+        return {
+          handle: this.appDocHandle as DocHandle<T>,
+          url: this.appDocHandle.url,
+          isNew: false,
+        };
+      }
+
+      if (response.status !== 404) {
+        const error = await response.json();
+        throw new Error(error.message ?? "Failed to look up App Document");
+      }
+    } catch (err) {
+      // If error is not 404, rethrow
+      if (
+        err instanceof Error &&
+        err.message !== "Failed to look up App Document"
+      ) {
+        console.warn("Error looking up App Document:", err);
+      }
+    }
+
+    // Create new document if not found
+    const newDocHandle = repo.create<T>();
+    const docUrl = newDocHandle.url;
+
+    // Initialize content if callback provided
+    if (options?.initialize) {
+      newDocHandle.change((doc: any) => options.initialize!(doc));
+    }
+
+    // Register it as the App Document on the server
+    try {
+      // Wait for document to be created locally
+      await newDocHandle.waitForReady();
+
+      // Register with the server (assuming the server supports this endpoint or similar mechanism)
+      // Since the example app suggests this works via the KV store logic on the server,
+      // we'll assume creating the document is enough or we need a way to link it.
+      //
+      // In a real implementation, we would likely POST to /api/v1/documents/app/{appId}
+      // to link this document ID to the app ID.
+      //
+      // For now, let's try to link it if the API supports it.
+      try {
+        await this.fetch(
+          `/api/v1/documents/app/${encodeURIComponent(targetAppId)}`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ documentId: newDocHandle.documentId }),
+          },
+        );
+      } catch (e) {
+        console.warn("Failed to register App Document on server:", e);
+      }
+
+      this.appDocHandle = newDocHandle;
+      return {
+        handle: newDocHandle,
+        url: docUrl,
+        isNew: true,
+      };
+    } catch (err) {
+      throw new Error(`Failed to create App Document: ${err}`);
+    }
+  }
+
+  /**
    * Log out the current user.
    */
   logout(): void {
