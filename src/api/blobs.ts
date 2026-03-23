@@ -1,6 +1,6 @@
 import { readFileSync, statSync } from "node:fs";
 import type { FastifyInstance } from "fastify";
-import { requireAuth } from "../auth/middleware.ts";
+import { hasScope, requireAuth } from "../auth/middleware.ts";
 import { checkBlobQuota } from "../lib/quotas.ts";
 import {
   assembleChunks,
@@ -44,6 +44,13 @@ export async function blobRoutes(fastify: FastifyInstance): Promise<void> {
     "/upload/init",
     { preHandler: requireAuth },
     async (request, reply) => {
+      if (!hasScope(request.auth!, "blobs:write")) {
+        return reply.code(403).send({
+          error: "insufficient_scope",
+          message: 'This action requires the "blobs:write" scope',
+        });
+      }
+
       const result = initBlobUploadSchema.safeParse(request.body);
       if (!result.success) {
         return reply.code(400).send({
@@ -398,11 +405,13 @@ export async function blobRoutes(fastify: FastifyInstance): Promise<void> {
     const blobPath = getBlobPath(hash);
     const stat = statSync(blobPath);
 
-    // Set headers
+    // Set headers — force download to prevent XSS via uploaded HTML/SVG
     reply.header("Content-Type", blob.mimeType);
+    reply.header("Content-Disposition", `attachment; filename="${hash}"`);
     reply.header("Content-Length", stat.size);
     reply.header("ETag", `"${hash}"`);
     reply.header("Cache-Control", "public, max-age=31536000, immutable");
+    reply.header("X-Content-Type-Options", "nosniff");
 
     // Handle range requests
     const range = request.headers.range;

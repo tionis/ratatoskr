@@ -85,13 +85,13 @@ export class RatatoskrNetworkAdapter extends NetworkAdapter {
 
     this.socket.onopen = () => {
       // Send auth message
-      this.socket?.send(
-        cbor.encode({
-          type: "auth",
-          token: this.token,
-          peerId: this.peerId,
-        }),
-      );
+      const authMessage: Record<string, unknown> = { type: "auth" };
+      if (this.token) {
+        authMessage.token = this.token;
+      } else {
+        authMessage.anonymous = true;
+      }
+      this.socket?.send(cbor.encode(authMessage));
     };
 
     this.socket.onmessage = (event) => {

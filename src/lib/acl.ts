@@ -27,7 +27,8 @@ export async function resolvePermissions(
   if (visited.has(documentId)) {
     return { canRead: false, canWrite: false };
   }
-  visited.add(documentId);
+  const pathVisited = new Set(visited);
+  pathVisited.add(documentId);
 
   // Check if user is owner
   const ownerId = await resolver.getDocumentOwner(documentId);
@@ -75,7 +76,7 @@ export async function resolvePermissions(
         entry.principal,
         userId,
         depth + 1,
-        visited,
+        new Set(pathVisited),
       );
 
       // If user has access to the referenced document, grant the specified permission

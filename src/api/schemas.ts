@@ -35,7 +35,16 @@ export const updateDocumentAclSchema = z.object({
 // API token creation
 export const createApiTokenSchema = z.object({
   name: z.string().min(1).max(100),
-  scopes: z.array(z.string()).optional(),
+  scopes: z
+    .array(
+      z
+        .string()
+        .min(1)
+        .max(100)
+        .regex(/^[a-zA-Z0-9:._-]+$/),
+    )
+    .max(50)
+    .optional(),
   expiresAt: flexibleDatetime.optional(),
 });
 

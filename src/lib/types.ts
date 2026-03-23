@@ -1,31 +1,66 @@
 import { z } from "zod";
 
-// Document ID patterns
-export const documentIdSchema = z.string().min(1);
-
-export type DocumentId = z.infer<typeof documentIdSchema>;
+const DOCUMENT_LOCAL_ID_REGEX = /^[A-Za-z0-9._-]+$/;
+const DOCUMENT_LOCAL_ID_MAX_LENGTH = 200;
 
 export type DocumentPrefix = "doc" | "app" | "eph";
+
+function isValidLocalDocumentId(localId: string): boolean {
+  if (localId.length === 0 || localId.length > DOCUMENT_LOCAL_ID_MAX_LENGTH) {
+    return false;
+  }
+
+  if (localId === "." || localId === "..") {
+    return false;
+  }
+
+  return DOCUMENT_LOCAL_ID_REGEX.test(localId);
+}
 
 export function parseDocumentId(id: string): {
   prefix: DocumentPrefix;
   localId: string;
 } {
+  if (!id) {
+    throw new Error("Document ID cannot be empty");
+  }
+
+  let prefix: DocumentPrefix = "doc";
+  let localId = id;
+
   if (id.startsWith("eph:")) {
-    return { prefix: "eph", localId: id.slice(4) };
+    prefix = "eph";
+    localId = id.slice(4);
+  } else if (id.startsWith("app:")) {
+    prefix = "app";
+    localId = id.slice(4);
+  } else if (id.startsWith("doc:")) {
+    prefix = "doc";
+    localId = id.slice(4);
   }
-  if (id.startsWith("app:")) {
-    return { prefix: "app", localId: id.slice(4) };
+
+  if (!isValidLocalDocumentId(localId)) {
+    throw new Error("Invalid document ID");
   }
-  if (id.startsWith("doc:")) {
-    return { prefix: "doc", localId: id.slice(4) };
-  }
-  // Default to "doc" for unprefixed IDs (standard Automerge IDs)
-  return {
-    prefix: "doc",
-    localId: id,
-  };
+
+  return { prefix, localId };
 }
+
+// Document ID patterns
+export const documentIdSchema = z
+  .string()
+  .min(1)
+  .max(DOCUMENT_LOCAL_ID_MAX_LENGTH + 4)
+  .refine((id) => {
+    try {
+      parseDocumentId(id);
+      return true;
+    } catch {
+      return false;
+    }
+  }, "Invalid document ID format");
+
+export type DocumentId = z.infer<typeof documentIdSchema>;
 
 // Permission types
 export const permissionSchema = z.enum(["read", "write"]);
@@ -33,7 +68,7 @@ export type Permission = z.infer<typeof permissionSchema>;
 
 // ACL entry
 export const aclEntrySchema = z.object({
-  principal: z.string(), // user ID, document ID, or "public"
+  principal: z.string().min(1).max(200), // user ID, document ID, or "public"
   permission: permissionSchema,
 });
 export type ACLEntry = z.infer<typeof aclEntrySchema>;
@@ -80,6 +115,8 @@ export interface ApiToken {
 export interface AuthContext {
   userId: string;
   isAnonymous: boolean;
+  /** API token scopes. null means full access (session token or unscoped API token). */
+  scopes: string[] | null;
 }
 
 // Blob metadata

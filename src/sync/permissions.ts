@@ -10,6 +10,17 @@ import {
   getDocumentByAutomergeId,
 } from "../storage/database.ts";
 
+function resolveDocumentMetadata(documentOrAutomergeId: string) {
+  return (
+    getDocumentByAutomergeId(documentOrAutomergeId) ??
+    getDocument(documentOrAutomergeId)
+  );
+}
+
+function isPrivateAppDocument(docType: string | null): boolean {
+  return typeof docType === "string" && docType.startsWith("app:");
+}
+
 /**
  * Create an ACL resolver backed by our database.
  */
@@ -50,7 +61,7 @@ function mapAutomergeIdToOurId(automergeId: string): string {
   }
 
   // Look up by automerge ID in the database
-  const doc = getDocumentByAutomergeId(automergeId);
+  const doc = resolveDocumentMetadata(automergeId);
   if (doc) {
     return doc.id;
   }
@@ -87,6 +98,11 @@ export async function canReadDocument(
     // If parsing fails, proceed with normal ACL check
   }
 
+  const resolvedDoc = resolveDocumentMetadata(documentId);
+  if (resolvedDoc && isPrivateAppDocument(resolvedDoc.type)) {
+    return userId !== null && resolvedDoc.ownerId === userId;
+  }
+
   // For doc: prefixed documents, check ACL
   const resolver = createACLResolver();
   return checkPermission(resolver, ourDocId, userId, "read");
@@ -118,6 +134,11 @@ export async function canWriteDocument(
     }
   } catch {
     // If parsing fails, proceed with normal ACL check
+  }
+
+  const resolvedDoc = resolveDocumentMetadata(documentId);
+  if (resolvedDoc && isPrivateAppDocument(resolvedDoc.type)) {
+    return userId !== null && resolvedDoc.ownerId === userId;
   }
 
   // For doc: prefixed documents, check ACL

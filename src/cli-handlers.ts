@@ -1,3 +1,5 @@
+import * as Automerge from "@automerge/automerge";
+import type { DocumentId } from "@automerge/automerge-repo";
 import {
   createUser,
   deleteBlob,
@@ -9,7 +11,7 @@ import {
   getDocument,
   getUser,
 } from "./storage/database.ts";
-import { readDocument } from "./storage/documents.ts";
+import { getRepo } from "./sync/repo.ts";
 
 export async function runAdminCli(args: string[]) {
   if (args.length === 0) {
@@ -134,14 +136,32 @@ async function handleDoc(action: string, params: string[]) {
     case "cat": {
       const id = params[0];
       if (!id) throw new Error("Missing document ID");
-      const data = await readDocument(id);
-      if (!data) {
-        console.error("Document file not found");
+      const doc = getDocument(id);
+      if (!doc) {
+        console.error("Document not found");
         return;
       }
-      // Try to print as text
-      const text = new TextDecoder().decode(data);
-      console.log(text);
+
+      const data = await getRepo().export(
+        (doc.automergeId ?? doc.id) as DocumentId,
+      );
+      if (!data) {
+        console.error("Document content not found");
+        return;
+      }
+
+      try {
+        const automergeDoc = Automerge.load(data);
+        const view = Automerge.view(
+          automergeDoc,
+          Automerge.getHeads(automergeDoc),
+        );
+        console.log(JSON.stringify(view, null, 2));
+      } catch {
+        // Fall back to raw text output if it's not valid Automerge data.
+        const text = new TextDecoder().decode(data);
+        console.log(text);
+      }
       break;
     }
     case "delete": {

@@ -7,6 +7,7 @@
  * - Message routing between clients and the repo
  */
 
+import { decodeSyncMessage } from "@automerge/automerge";
 import {
   cbor,
   type Message,
@@ -17,10 +18,20 @@ import {
 import type { WebSocket } from "@fastify/websocket";
 import { verifyApiToken, verifySessionToken } from "../auth/tokens.ts";
 import { config } from "../config.ts";
+import {
+  checkDocumentSizeQuota,
+  checkTotalStorageQuota,
+} from "../lib/quotas.ts";
 import { checkRateLimit } from "../lib/rate-limit.ts";
-import { getDocumentByAutomergeId } from "../storage/database.ts";
+import {
+  getDocument,
+  getDocumentByAutomergeId,
+  getUser,
+  getUserTotalStorage,
+  updateDocumentSize,
+} from "../storage/database.ts";
 import { ephemeralManager, isEphemeralId } from "./ephemeral.ts";
-import { canReadDocument } from "./permissions.ts";
+import { canReadDocument, canWriteDocument } from "./permissions.ts";
 import { userManager } from "./user-manager.ts";
 
 interface AuthenticatedClient {
@@ -29,6 +40,21 @@ interface AuthenticatedClient {
   userId: string | null;
   isAnonymous: boolean;
   ephemeralDocs: Set<string>; // Track which ephemeral docs this peer is connected to
+  /** Documents this peer has passed read permission checks for (built on inbound). */
+  authorizedDocs: Set<string>;
+}
+
+function messageContainsChanges(message: Message): boolean | null {
+  if (message.type !== "sync" || !message.data) {
+    return null;
+  }
+
+  try {
+    const decoded = decodeSyncMessage(message.data);
+    return decoded.changes.length > 0;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -61,6 +87,17 @@ export class ServerNetworkAdapter extends NetworkAdapter {
     const client = this.clients.get(message.targetId);
     if (!client) {
       return;
+    }
+
+    // Check outbound permission for document-scoped messages.
+    // The repo may try to push document state to any peer — we must filter.
+    if ("documentId" in message && message.documentId) {
+      const docId = message.documentId as string;
+      // Ephemeral docs are always allowed
+      if (!isEphemeralId(docId) && !client.authorizedDocs.has(docId)) {
+        // Peer hasn't passed a read check for this doc — drop silently.
+        return;
+      }
     }
 
     const encoded = cbor.encode(message);
@@ -147,7 +184,7 @@ export class ServerNetworkAdapter extends NetworkAdapter {
           }
 
           const token = message.token as string | undefined;
-          const requestedPeerId = message.peerId as PeerId | undefined;
+          const wantsAnonymous = message.anonymous === true;
           let userId: string | null = null;
           let isAnonymous = true;
 
@@ -159,13 +196,14 @@ export class ServerNetworkAdapter extends NetworkAdapter {
               isAnonymous = false;
             } else {
               // Try API token
-              userId = verifyApiToken(token);
-              if (userId) {
+              const apiToken = verifyApiToken(token);
+              if (apiToken) {
+                userId = apiToken.userId;
                 isAnonymous = false;
               }
             }
 
-            if (!userId && token !== "") {
+            if (!userId) {
               socket.send(
                 cbor.encode({
                   type: "auth_error",
@@ -177,6 +215,18 @@ export class ServerNetworkAdapter extends NetworkAdapter {
               resolve(null);
               return;
             }
+          } else if (!wantsAnonymous) {
+            // No token and not explicitly requesting anonymous access
+            socket.send(
+              cbor.encode({
+                type: "auth_error",
+                error: "missing_credentials",
+                message: "Provide a token or set anonymous: true",
+              }),
+            );
+            socket.close();
+            resolve(null);
+            return;
           }
 
           // Rate limit anonymous connections
@@ -203,9 +253,8 @@ export class ServerNetworkAdapter extends NetworkAdapter {
             }
           }
 
-          // Use requested peer ID or generate one
-          const peerId =
-            requestedPeerId ?? (`client-${crypto.randomUUID()}` as PeerId);
+          // Always generate peer IDs server-side.
+          const peerId = `client-${crypto.randomUUID()}` as PeerId;
 
           client = {
             peerId,
@@ -213,6 +262,7 @@ export class ServerNetworkAdapter extends NetworkAdapter {
             userId,
             isAnonymous,
             ephemeralDocs: new Set(),
+            authorizedDocs: new Set(),
           };
 
           this.clients.set(peerId, client);
@@ -223,6 +273,7 @@ export class ServerNetworkAdapter extends NetworkAdapter {
             cbor.encode({
               type: "auth_ok",
               peerId: this.peerId, // Send server's peer ID
+              clientPeerId: peerId,
               user: userId ? { id: userId } : null,
             }),
           );
@@ -286,14 +337,23 @@ export class ServerNetworkAdapter extends NetworkAdapter {
 
   private handleDisconnect(peerId: PeerId): void {
     const client = this.clients.get(peerId);
-    if (client) {
-      this.socketToPeer.delete(client.socket);
-
-      // Clean up ephemeral document connections
-      for (const docId of client.ephemeralDocs) {
-        ephemeralManager.removePeer(docId, peerId);
-      }
+    if (!client) {
+      // Already cleaned up (idempotent — may be called from multiple handlers)
+      return;
     }
+
+    this.socketToPeer.delete(client.socket);
+
+    // Clean up ephemeral document connections
+    for (const docId of client.ephemeralDocs) {
+      ephemeralManager.removePeer(docId, peerId);
+    }
+
+    // Stop watching user document
+    if (client.userId) {
+      userManager.stopWatching(client.userId);
+    }
+
     this.clients.delete(peerId);
     this.emit("peer-disconnected", { peerId });
   }
@@ -329,7 +389,7 @@ export class ServerNetworkAdapter extends NetworkAdapter {
       }
     }
 
-    // Check document permissions for sync messages
+    // Check document permissions for sync messages.
     if (
       (type === "sync" || type === "request") &&
       "documentId" in message &&
@@ -343,28 +403,22 @@ export class ServerNetworkAdapter extends NetworkAdapter {
           client.ephemeralDocs.add(docId);
           ephemeralManager.addPeer(docId, client.peerId);
         }
-      }
-
-      // Check if document exists by automerge ID
-      const existingDoc = getDocumentByAutomergeId(docId);
-
-      console.log(
-        `[Sync] Doc check: ${docId}, exists: ${!!existingDoc}, user: ${client.userId}`,
-      );
-
-      // If document doesn't exist and user is authenticated, allow sync
-      // The client will create the document metadata via API
-      // This handles the race condition where sync starts before API registration
-      if (!existingDoc && client.userId && !client.isAnonymous) {
-        // Allow the sync to proceed - document will be registered via API
-        // Skip permission check for unregistered documents from authenticated users
-        console.log(
-          `[Sync] Allowing sync for non-existent doc ${docId} (authenticated user)`,
-        );
       } else {
-        const canRead = await canReadDocument(docId, client.userId);
-        console.log(`[Sync] Permission check for ${docId}: ${canRead}`);
+        const existingDoc =
+          getDocumentByAutomergeId(docId) ?? getDocument(docId);
+        if (!existingDoc) {
+          client.socket.send(
+            cbor.encode({
+              type: "error",
+              error: "document_not_found",
+              documentId: docId,
+              message: "Document must be created via API before syncing",
+            }),
+          );
+          return;
+        }
 
+        const canRead = await canReadDocument(docId, client.userId);
         if (!canRead) {
           client.socket.send(
             cbor.encode({
@@ -375,6 +429,105 @@ export class ServerNetworkAdapter extends NetworkAdapter {
             }),
           );
           return;
+        }
+
+        // Record that this peer has passed the read check for this document.
+        // This is used by send() to filter outbound messages.
+        client.authorizedDocs.add(docId);
+
+        if (type === "sync") {
+          const hasChanges = messageContainsChanges(message);
+          if (hasChanges === null) {
+            client.socket.send(
+              cbor.encode({
+                type: "error",
+                error: "invalid_sync_message",
+                documentId: docId,
+                message: "Unable to decode sync payload",
+              }),
+            );
+            return;
+          }
+
+          if (hasChanges) {
+            const canWrite = await canWriteDocument(docId, client.userId);
+            if (!canWrite) {
+              client.socket.send(
+                cbor.encode({
+                  type: "error",
+                  error: "permission_denied",
+                  documentId: docId,
+                  message: "Write access required to apply changes",
+                }),
+              );
+              return;
+            }
+
+            const owner = getUser(existingDoc.ownerId);
+            if (!owner) {
+              client.socket.send(
+                cbor.encode({
+                  type: "error",
+                  error: "internal_error",
+                  documentId: docId,
+                  message: "Document owner not found",
+                }),
+              );
+              return;
+            }
+
+            const estimatedAdditionalSize = message.data?.length ?? 0;
+            const sizeCheck = checkDocumentSizeQuota(
+              owner,
+              existingDoc.size + estimatedAdditionalSize,
+            );
+            if (!sizeCheck.allowed) {
+              client.socket.send(
+                cbor.encode({
+                  type: "error",
+                  error: "quota_exceeded",
+                  documentId: docId,
+                  quota: sizeCheck.quota,
+                  current: sizeCheck.current,
+                  limit: sizeCheck.limit,
+                  message: "Document size quota exceeded",
+                }),
+              );
+              return;
+            }
+
+            if (estimatedAdditionalSize > 0) {
+              const totalStorageCheck = await checkTotalStorageQuota(
+                {
+                  getUserDocumentCount: async () => 0,
+                  getUserTotalStorage: async (uid) => getUserTotalStorage(uid),
+                },
+                owner,
+                estimatedAdditionalSize,
+              );
+
+              if (!totalStorageCheck.allowed) {
+                client.socket.send(
+                  cbor.encode({
+                    type: "error",
+                    error: "quota_exceeded",
+                    documentId: docId,
+                    quota: totalStorageCheck.quota,
+                    current: totalStorageCheck.current,
+                    limit: totalStorageCheck.limit,
+                    message: "Total storage quota exceeded",
+                  }),
+                );
+                return;
+              }
+
+              // Keep metadata roughly in sync for quota checks across WS writes.
+              updateDocumentSize(
+                existingDoc.id,
+                existingDoc.size + estimatedAdditionalSize,
+              );
+            }
+          }
         }
       }
     }

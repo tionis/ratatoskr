@@ -28,15 +28,17 @@ export function extractAuth(request: FastifyRequest): AuthContext | null {
       return {
         userId: payload.sub,
         isAnonymous: false,
+        scopes: null, // Session tokens have full access
       };
     }
 
     // Try API token
-    const userId = verifyApiToken(token);
-    if (userId) {
+    const apiToken = verifyApiToken(token);
+    if (apiToken) {
       return {
-        userId,
+        userId: apiToken.userId,
         isAnonymous: false,
+        scopes: apiToken.scopes,
       };
     }
   }
@@ -61,6 +63,41 @@ export async function requireAuth(
   }
 
   request.auth = auth;
+}
+
+/**
+ * Check if the current auth context has the required scope.
+ * Returns true if scopes is null (full access) or includes the required scope.
+ */
+export function hasScope(auth: AuthContext, scope: string): boolean {
+  // null scopes = full access (session token or unscoped API token)
+  if (auth.scopes === null) return true;
+  return auth.scopes.includes(scope);
+}
+
+/**
+ * Create a middleware that requires a specific scope.
+ * Must be used after requireAuth.
+ */
+export function requireScope(scope: string) {
+  return async (
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ): Promise<FastifyReply | void> => {
+    if (!request.auth) {
+      return reply.code(401).send({
+        error: "unauthorized",
+        message: "Authentication required",
+      });
+    }
+
+    if (!hasScope(request.auth, scope)) {
+      return reply.code(403).send({
+        error: "insufficient_scope",
+        message: `This action requires the "${scope}" scope`,
+      });
+    }
+  };
 }
 
 /**

@@ -17,7 +17,8 @@ export interface AuthResult {
  */
 export function authenticate(serverUrl: string): Promise<AuthResult> {
   return new Promise((resolve, reject) => {
-    const loginUrl = `${serverUrl}/api/v1/auth/login`;
+    const loginUrl = new URL("/api/v1/auth/login", serverUrl);
+    loginUrl.searchParams.set("origin", window.location.origin);
 
     // Open popup
     const width = 500;
@@ -26,7 +27,7 @@ export function authenticate(serverUrl: string): Promise<AuthResult> {
     const top = window.screenY + (window.outerHeight - height) / 2;
 
     const popup = window.open(
-      loginUrl,
+      loginUrl.toString(),
       "ratatoskr-auth",
       `width=${width},height=${height},left=${left},top=${top}`,
     );

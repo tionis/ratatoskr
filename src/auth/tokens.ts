@@ -1,8 +1,22 @@
-import { createHash, randomBytes } from "node:crypto";
+import {
+  createHash,
+  createHmac,
+  randomBytes,
+  timingSafeEqual,
+} from "node:crypto";
 import type { ApiToken } from "../lib/types.ts";
 import { getDb } from "../storage/database.ts";
 
-const JWT_SECRET = process.env.JWT_SECRET || randomBytes(32).toString("hex");
+const JWT_SECRET =
+  process.env.JWT_SECRET ||
+  (() => {
+    console.warn(
+      "[ratatoskr] WARNING: JWT_SECRET not set. Generated a random secret. " +
+        "All session tokens will be invalidated on restart. " +
+        "Set JWT_SECRET in your environment for production use.",
+    );
+    return randomBytes(32).toString("hex");
+  })();
 
 export interface TokenPayload {
   sub: string;
@@ -26,8 +40,8 @@ export function createSessionToken(
   };
 
   const data = Buffer.from(JSON.stringify(payload)).toString("base64url");
-  const signature = createHash("sha256")
-    .update(data + JWT_SECRET)
+  const signature = createHmac("sha256", JWT_SECRET)
+    .update(data)
     .digest("base64url");
 
   return `${data}.${signature}`;
@@ -47,11 +61,16 @@ export function verifySessionToken(token: string): TokenPayload | null {
     return null;
   }
 
-  const expectedSignature = createHash("sha256")
-    .update(data + JWT_SECRET)
+  const expectedSignature = createHmac("sha256", JWT_SECRET)
+    .update(data)
     .digest("base64url");
 
-  if (signature !== expectedSignature) {
+  const sigBuf = Buffer.from(signature);
+  const expectedBuf = Buffer.from(expectedSignature);
+  if (
+    sigBuf.length !== expectedBuf.length ||
+    !timingSafeEqual(sigBuf, expectedBuf)
+  ) {
     return null;
   }
 
@@ -82,6 +101,11 @@ export function createApiToken(
   const token = `rat_${randomBytes(32).toString("hex")}`;
   const tokenHash = hashApiToken(token);
   const id = randomBytes(16).toString("hex");
+  const normalizedScopes = scopes
+    ? Array.from(
+        new Set(scopes.map((scope) => scope.trim()).filter(Boolean)),
+      ).sort()
+    : null;
 
   const stmt = getDb().prepare(`
     INSERT INTO api_tokens (id, user_id, name, token_hash, scopes, expires_at)
@@ -94,7 +118,7 @@ export function createApiToken(
     userId,
     name,
     tokenHash,
-    scopes ? JSON.stringify(scopes) : null,
+    normalizedScopes ? JSON.stringify(normalizedScopes) : null,
     expiresAt?.toISOString() ?? null,
   ) as Record<string, unknown>;
 
@@ -104,10 +128,15 @@ export function createApiToken(
   };
 }
 
+export interface ApiTokenVerification {
+  userId: string;
+  scopes: string[] | null;
+}
+
 /**
- * Verify an API token and return the associated user ID.
+ * Verify an API token and return the associated user ID and scopes.
  */
-export function verifyApiToken(token: string): string | null {
+export function verifyApiToken(token: string): ApiTokenVerification | null {
   if (!token.startsWith("rat_")) {
     return null;
   }
@@ -133,7 +162,10 @@ export function verifyApiToken(token: string): string | null {
     )
     .run(row.id as string);
 
-  return row.user_id as string;
+  return {
+    userId: row.user_id as string,
+    scopes: row.scopes ? JSON.parse(row.scopes as string) : null,
+  };
 }
 
 /**

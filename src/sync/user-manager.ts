@@ -128,6 +128,10 @@ class UserManager {
 
   /**
    * Watch the User Document for changes (e.g. ACL updates) and sync back to DB.
+   *
+   * TODO: Implement Sync Doc -> DB logic when we define ACL schema in the doc.
+   * When implementing, store the listener reference so stopWatching can call
+   * handle.off("change", listener) to avoid leaks.
    */
   private async watchUserDocument(userId: string, docId: string) {
     if (this.handles.has(userId)) return; // Already watching
@@ -135,26 +139,13 @@ class UserManager {
     const repo = getRepo();
     const handle = await repo.find<UserDocument>(`automerge:${docId}` as any);
     this.handles.set(userId, handle);
-
-    handle.on("change", ({ doc: _doc }: any) => {
-      // TODO: Implement Sync Doc -> DB logic
-      // e.g. check for ACL changes in doc.owned[id].acl if we add that field
-      // For now, this is a placeholder as the requirement specified "Server watches for changes... and sync them back"
-      // but we haven't defined the exact schema for ACLs in the doc yet.
-    });
   }
 
   /**
    * Stop watching a user document (on disconnect).
    */
-  stopWatching(_userId: string) {
-    // In a real server, we might want to keep watching active users for a while,
-    // or stop immediately. For now, we assume we keep handles in memory or rely on repo cache.
-    // To properly "unwatch", we'd remove the listener.
-    // automerge-repo handles don't have "off" easily exposed in all versions,
-    // but we can just drop the reference if we don't need to explicitly unsubscribe.
-    // However, if we attached a listener, it persists.
-    // For this POC, we'll leave it attached.
+  stopWatching(userId: string) {
+    this.handles.delete(userId);
   }
 }
 

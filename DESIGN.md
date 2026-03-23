@@ -30,7 +30,7 @@ Ratatoskr is a backend server providing automerge-repo synchronization with auth
                     │  └──────────────────┘   │
                     │  ┌──────────────────┐   │
                     │  │  Storage         │   │
-                    │  │  (SQLite + FS)   │   │
+                    │  │ (SQLite + BlobFS)│   │
                     │  └──────────────────┘   │
                     └─────────────────────────┘
 ```
@@ -84,6 +84,7 @@ For web applications:
 For CLI tools:
 - Long-lived tokens generated via UI/CLI.
 - Used for direct WebSocket or REST API access.
+- Token scopes are persisted but not enforced yet.
 
 ## Authorization & Access Control
 
@@ -122,10 +123,10 @@ Standard `automerge-repo` sync protocol over WebSocket at `/sync`.
 
 ### Architecture
 
-Dual-database + Filesystem:
-- `ratatoskr.db` (SQLite): Metadata, Users, ACLs, Blob index.
-- `automerge.db` (SQLite): Automerge binary chunks (efficient storage).
-- Filesystem: Blob data.
+Dual-database + blob filesystem:
+- `ratatoskr.db` (SQLite): Metadata, users, ACLs, app document links, blob index.
+- `automerge.db` (SQLite): Canonical Automerge document state/chunks.
+- Filesystem: Blob payload data only.
 
 ### Schema (`ratatoskr.db`)
 
@@ -143,7 +144,7 @@ CREATE TABLE users (
 CREATE TABLE documents (
   id TEXT PRIMARY KEY,           -- Base58 ID
   owner_id TEXT NOT NULL REFERENCES users(id),
-  automerge_id TEXT,             -- Same as ID (legacy support)
+  automerge_id TEXT,             -- Sync document ID used by automerge-repo
   type TEXT,
   -- ...
 );

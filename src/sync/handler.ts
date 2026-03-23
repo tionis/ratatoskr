@@ -13,9 +13,7 @@ export async function syncHandler(
   socket: WebSocket,
   request: FastifyRequest,
 ): Promise<void> {
-  const clientIp =
-    (request.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ??
-    request.ip;
+  const clientIp = request.ip;
 
   const networkAdapter = getNetworkAdapter();
 

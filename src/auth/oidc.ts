@@ -1,15 +1,19 @@
 import * as oauth from "oauth4webapi";
 import { config } from "../config.ts";
 
-// Cached authorization server metadata
+// Cached authorization server metadata (refreshed every hour)
+const METADATA_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 let authServerCache: oauth.AuthorizationServer | null = null;
+let authServerCacheTime = 0;
 let oauthClient: oauth.Client | null = null;
 
 async function getAuthServer(): Promise<oauth.AuthorizationServer> {
-  if (!authServerCache) {
+  const now = Date.now();
+  if (!authServerCache || now - authServerCacheTime > METADATA_CACHE_TTL_MS) {
     const issuerUrl = new URL(config.oidc.issuer);
     const response = await oauth.discoveryRequest(issuerUrl);
     authServerCache = await oauth.processDiscoveryResponse(issuerUrl, response);
+    authServerCacheTime = now;
   }
   return authServerCache;
 }

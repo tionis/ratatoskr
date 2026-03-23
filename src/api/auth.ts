@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { FastifyInstance } from "fastify";
-import { requireAuth } from "../auth/middleware.ts";
+import { hasScope, requireAuth } from "../auth/middleware.ts";
 import {
   generateCodeVerifier,
   getAuthorizationUrl,
@@ -16,9 +16,10 @@ import { createUser, getUser } from "../storage/database.ts";
 import { createApiTokenSchema } from "./schemas.ts";
 
 // In-memory store for PKCE state (in production, use Redis or similar)
+const MAX_PENDING_AUTH = 1000;
 const pendingAuth = new Map<
   string,
-  { codeVerifier: string; createdAt: number }
+  { codeVerifier: string; createdAt: number; expectedOrigin: string | null }
 >();
 
 // Clean up old pending auth entries periodically
@@ -32,13 +33,62 @@ setInterval(() => {
   }
 }, 60_000);
 
+function normalizeOrigin(origin: string | undefined): string | null {
+  if (!origin) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(origin);
+    if (parsed.origin === "null") {
+      return null;
+    }
+    return parsed.origin;
+  } catch {
+    return null;
+  }
+}
+
+function safeJsonForHtml(value: unknown): string {
+  return JSON.stringify(value).replace(/[<>&\u2028\u2029]/g, (char) => {
+    switch (char) {
+      case "<":
+        return "\\u003c";
+      case ">":
+        return "\\u003e";
+      case "&":
+        return "\\u0026";
+      case "\u2028":
+        return "\\u2028";
+      case "\u2029":
+        return "\\u2029";
+      default:
+        return char;
+    }
+  });
+}
+
 export async function authRoutes(fastify: FastifyInstance): Promise<void> {
   // Initiate OIDC login
   fastify.get("/login", async (request, reply) => {
+    const { origin } = request.query as { origin?: string };
+    const expectedOrigin = normalizeOrigin(origin);
     const state = randomBytes(16).toString("hex");
     const codeVerifier = generateCodeVerifier();
 
-    pendingAuth.set(state, { codeVerifier, createdAt: Date.now() });
+    if (pendingAuth.size >= MAX_PENDING_AUTH) {
+      reply.code(503).send({
+        error: "service_busy",
+        message: "Too many pending login requests. Please try again later.",
+      });
+      return;
+    }
+
+    pendingAuth.set(state, {
+      codeVerifier,
+      createdAt: Date.now(),
+      expectedOrigin,
+    });
 
     const authUrl = await getAuthorizationUrl(state, codeVerifier);
 
@@ -86,8 +136,8 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
         pending.codeVerifier,
       );
 
-      // Create or update user - prefer username over sub for cleaner IDs
-      const userId = oidcUser.preferredUsername || oidcUser.sub;
+      // Use stable OIDC subject as canonical user identity.
+      const userId = `oidc:${oidcUser.sub}`;
       const user = createUser({
         id: userId,
         email: oidcUser.email ?? null,
@@ -96,15 +146,25 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
 
       // Create session token
       const token = createSessionToken(user.id);
-      const userJson = JSON.stringify({
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        userDocumentId: user.userDocumentId,
+      const authPayloadJson = safeJsonForHtml({
+        token,
+        user: {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          userDocumentId: user.userDocumentId,
+        },
+        targetOrigin: pending.expectedOrigin,
       });
 
       // Show confirmation page before sending credentials to opener
-      return reply.type("text/html").send(`
+      return reply
+        .header(
+          "Content-Security-Policy",
+          "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; connect-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+        )
+        .type("text/html")
+        .send(`
         <!DOCTYPE html>
         <html>
         <head>
@@ -172,6 +232,10 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
               transition: opacity 0.2s;
             }
             button:hover { opacity: 0.9; }
+            button:disabled {
+              opacity: 0.5;
+              cursor: not-allowed;
+            }
             .btn-approve { background: #4f9cf9; color: white; }
             .btn-deny { background: #4a4a6a; color: #eaeaea; }
             .no-opener {
@@ -182,60 +246,72 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
         </head>
         <body>
           <div class="card" id="confirm-card">
-            <div class="avatar">${user.name?.[0]?.toUpperCase() || user.id[0]?.toUpperCase() || "?"}</div>
+            <div class="avatar" id="avatar">?</div>
             <h1>Confirm Login</h1>
             <p class="user-info">
-              Logged in as <span class="user-name">${user.name || user.id}</span>
+              Logged in as <span class="user-name" id="user-name">Loading...</span>
             </p>
             <div class="origin-box">
               <div class="origin-label">Application requesting access:</div>
               <div class="origin-value" id="origin">Loading...</div>
             </div>
-            <p class="warning">
+            <p class="warning" id="warning">
               Only approve if you trust this application.
             </p>
             <div class="buttons">
               <button class="btn-deny" onclick="deny()">Deny</button>
-              <button class="btn-approve" onclick="approve()">Approve</button>
+              <button class="btn-approve" id="approve-btn" onclick="approve()">Approve</button>
             </div>
           </div>
           <div class="card no-opener" id="no-opener" style="display:none;">
             <h1>Authentication Successful</h1>
             <p>You can close this window.</p>
           </div>
+          <script id="auth-data" type="application/json">${authPayloadJson}</script>
           <script>
-            const token = '${token}';
-            const user = ${userJson};
+            const authDataNode = document.getElementById('auth-data');
+            const payload = authDataNode ? JSON.parse(authDataNode.textContent || '{}') : {};
+            const user = payload.user ?? null;
+            const targetOrigin = typeof payload.targetOrigin === 'string' ? payload.targetOrigin : null;
+
+            const displayName = user?.name || user?.id || 'Unknown user';
+            const avatarChar = (displayName[0] || '?').toUpperCase();
+            document.getElementById('user-name').textContent = displayName;
+            document.getElementById('avatar').textContent = avatarChar;
 
             // Check if opened as popup
             if (!window.opener) {
               document.getElementById('confirm-card').style.display = 'none';
               document.getElementById('no-opener').style.display = 'block';
             } else {
-              // Show the opener's origin
-              // Note: We can't directly access opener.location due to cross-origin restrictions
-              // Instead, we use document.referrer or let the client provide origin in state
-              const openerOrigin = document.referrer ? new URL(document.referrer).origin : 'Unknown origin';
-              document.getElementById('origin').textContent = openerOrigin;
+              const originLabel = document.getElementById('origin');
+              originLabel.textContent = targetOrigin || 'Unknown origin';
+
+              if (!targetOrigin) {
+                const approveButton = document.getElementById('approve-btn');
+                approveButton.disabled = true;
+                const warning = document.getElementById('warning');
+                warning.textContent = 'Cannot securely deliver credentials to this application.';
+              }
             }
 
             function approve() {
-              if (window.opener) {
+              if (window.opener && targetOrigin) {
                 window.opener.postMessage({
                   type: 'ratatoskr:auth',
-                  token: token,
+                  token: payload.token,
                   user: user
-                }, '*');
+                }, targetOrigin);
               }
               window.close();
             }
 
             function deny() {
-              if (window.opener) {
+              if (window.opener && targetOrigin) {
                 window.opener.postMessage({
                   type: 'ratatoskr:auth',
                   error: 'User denied the login request'
-                }, '*');
+                }, targetOrigin);
               }
               window.close();
             }
@@ -285,6 +361,13 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
     "/api-tokens",
     { preHandler: requireAuth },
     async (request, reply) => {
+      if (!hasScope(request.auth!, "tokens:manage")) {
+        return reply.code(403).send({
+          error: "insufficient_scope",
+          message: 'This action requires the "tokens:manage" scope',
+        });
+      }
+
       const result = createApiTokenSchema.safeParse(request.body);
       if (!result.success) {
         reply.code(400).send({
@@ -334,6 +417,13 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
     "/api-tokens/:id",
     { preHandler: requireAuth },
     async (request, reply) => {
+      if (!hasScope(request.auth!, "tokens:manage")) {
+        return reply.code(403).send({
+          error: "insufficient_scope",
+          message: 'This action requires the "tokens:manage" scope',
+        });
+      }
+
       const { id } = request.params as { id: string };
 
       const deleted = deleteApiToken(id, request.auth!.userId);

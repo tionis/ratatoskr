@@ -4,21 +4,22 @@ import {
   deleteBlobUpload,
   deleteDocument,
   deleteExpiredTokens,
+  getDocument,
   getExpiredBlobUploads,
   getExpiredDocuments,
   getReleasedBlobs,
 } from "../storage/database.ts";
-import { deleteDocumentFile } from "../storage/documents.ts";
+import { getStorageAdapter } from "../sync/repo.ts";
 
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 const BLOB_GRACE_PERIOD_MS = 24 * 60 * 60 * 1000; // 24 hours
 
-export function cleanupExpiredItems(): {
+export async function cleanupExpiredItems(): Promise<{
   tokensDeleted: number;
   documentsDeleted: number;
   blobsDeleted: number;
   uploadsDeleted: number;
-} {
+}> {
   // Cleanup tokens
   const tokensDeleted = deleteExpiredTokens();
 
@@ -28,8 +29,10 @@ export function cleanupExpiredItems(): {
 
   for (const docId of expiredDocs) {
     try {
-      // Remove from filesystem first
-      deleteDocumentFile(docId);
+      const doc = getDocument(docId);
+      if (doc) {
+        await getStorageAdapter().removeRange([doc.automergeId ?? doc.id]);
+      }
       // Then remove from database
       if (deleteDocument(docId)) {
         documentsDeleted++;
@@ -78,7 +81,7 @@ export function cleanupExpiredItems(): {
 }
 
 function hasCleanedItems(
-  result: ReturnType<typeof cleanupExpiredItems>,
+  result: Awaited<ReturnType<typeof cleanupExpiredItems>>,
 ): boolean {
   return (
     result.tokensDeleted > 0 ||
@@ -90,7 +93,7 @@ function hasCleanedItems(
 
 function logCleanupResult(
   prefix: string,
-  result: ReturnType<typeof cleanupExpiredItems>,
+  result: Awaited<ReturnType<typeof cleanupExpiredItems>>,
 ): void {
   const parts: string[] = [];
   if (result.tokensDeleted > 0) parts.push(`${result.tokensDeleted} tokens`);
@@ -104,25 +107,27 @@ function logCleanupResult(
 
 export function startCleanupJob() {
   // Run immediately on startup
-  try {
-    const result = cleanupExpiredItems();
-    if (hasCleanedItems(result)) {
-      logCleanupResult("Initial cleanup", result);
-    }
-  } catch (error) {
-    console.error("Initial cleanup failed:", error);
-  }
+  cleanupExpiredItems()
+    .then((result) => {
+      if (hasCleanedItems(result)) {
+        logCleanupResult("Initial cleanup", result);
+      }
+    })
+    .catch((error) => {
+      console.error("Initial cleanup failed:", error);
+    });
 
   // Schedule periodic cleanup
   setInterval(() => {
-    try {
-      const result = cleanupExpiredItems();
-      if (hasCleanedItems(result)) {
-        logCleanupResult("Cleanup", result);
-      }
-    } catch (error) {
-      console.error("Cleanup job failed:", error);
-    }
+    cleanupExpiredItems()
+      .then((result) => {
+        if (hasCleanedItems(result)) {
+          logCleanupResult("Cleanup", result);
+        }
+      })
+      .catch((error) => {
+        console.error("Cleanup job failed:", error);
+      });
   }, CLEANUP_INTERVAL_MS);
 
   console.log("Cleanup job started");

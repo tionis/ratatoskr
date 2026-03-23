@@ -25,7 +25,7 @@ export interface DocumentMetadata {
 }
 
 export interface CreateDocumentRequest {
-  id: string;
+  id?: string;
   automergeId?: string;
   type?: string;
   acl?: ACLEntry[];
@@ -40,7 +40,7 @@ export interface ListDocumentsResponse {
 export interface ApiToken {
   id: string;
   name: string;
-  scopes: string[];
+  scopes: string[] | null;
   lastUsedAt: string | null;
   expiresAt: string | null;
   createdAt: string;

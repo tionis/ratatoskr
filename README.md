@@ -16,7 +16,7 @@ Ratatoskr is an automerge-repo sync server with authentication and per-document 
   - **App Doc**: Per-user-per-app root document (replaces KV store)
   - **Ephemeral**: Relay documents for temporary collaboration
 - **Rate limiting**: Protection against abuse for anonymous users
-- **Quotas**: Per-user limits on document count, size, blob storage, and total storage
+- **Quotas**: Per-user limits enforced on document creation, content updates, and blob operations
 
 ## Quick Start
 
@@ -216,6 +216,14 @@ podman build -t ratatoskr -f Containerfile .
 | `OIDC_CLIENT_ID` | Yes | - | OIDC client ID |
 | `OIDC_CLIENT_SECRET` | No | - | OIDC client secret (for confidential clients) |
 | `OIDC_REDIRECT_URI` | Yes | - | OAuth callback URL |
+| `CORS_ALLOWED_ORIGINS` | No | - | Comma-separated additional CORS origins (defaults to `BASE_URL` origin only) |
+
+## Current Behavior Notes
+
+- App documents are private by design and cannot be shared via ACL.
+- API token scopes are stored for future use but are not enforced yet.
+- Document content is read/written through Automerge repo storage (`automerge.db`).
+- WebSocket sync write quota checks currently use estimated growth from incoming sync payloads.
 
 ## Development
 

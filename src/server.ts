@@ -19,6 +19,7 @@ import { syncHandler } from "./sync/handler.ts";
 export async function createServer(_config: Config) {
   const server = Fastify({
     logger: true,
+    bodyLimit: 11 * 1024 * 1024, // 11 MB — slightly above max chunk size (10 MB) to allow for encoding overhead
   });
 
   // Add content type parser for binary uploads
@@ -30,9 +31,11 @@ export async function createServer(_config: Config) {
     },
   );
 
-  // Register plugins
+  // Allow all origins — this is a sync API server, not a website.
+  // Auth is token-based (Authorization header), not cookie-based,
+  // so CORS provides no security benefit and only blocks legitimate apps.
   await server.register(cors, {
-    origin: true, // TODO: Configure allowed origins
+    origin: true,
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
   });

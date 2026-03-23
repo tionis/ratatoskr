@@ -1,7 +1,7 @@
 // Ratatoskr Notes - Collaborative Document Editor Example
 //
 // This example demonstrates the recommended app state pattern:
-// 1. Use client.getOrCreateAppDocument() to get a per-user root document
+// 1. Use client.getOrCreateAppDocument() to get a per-user private root document
 // 2. The root document stores references to other documents (notes)
 // 3. Individual notes are synced automerge documents
 //
@@ -64,26 +64,13 @@ function getServerId(automergeUrl) {
 }
 
 /**
- * Initialize the app's root document using the KV store.
- *
- * This uses client.getOrCreateAppDocument() which:
- * 1. Checks server-side KV store for existing document URL
- * 2. If found, returns existing document
- * 3. If not found, creates new document and stores URL in KV store
+ * Initialize the app's private root document.
  */
 async function initializeAppDocument() {
   if (!currentUser) return;
 
   try {
-    const result = await client.getOrCreateAppDocument(APP_NAMESPACE, {
-      key: "root",
-      type: "app-index",
-      initialize: (doc) => {
-        doc.notes = [];
-        doc.settings = {};
-        doc.version = 1;
-      },
-    });
+    const result = await client.getOrCreateAppDocument(APP_NAMESPACE);
 
     appDocHandle = result.handle;
     appDocUrl = result.url;
@@ -93,11 +80,7 @@ async function initializeAppDocument() {
 
     appDocHandle.on("change", () => renderDocumentList());
 
-    if (result.isNew) {
-      console.log("Created new app document:", appDocUrl);
-    } else {
-      console.log("Loaded existing app document:", appDocUrl);
-    }
+    console.log("Loaded app document:", appDocUrl);
   } catch (err) {
     console.error("Failed to initialize app document:", err);
     showToast("Failed to load your documents", "error");

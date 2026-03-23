@@ -76,6 +76,7 @@ function runMigrations(): void {
       UNIQUE(document_id, principal)
     )`,
 
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_api_tokens_hash ON api_tokens(token_hash)`,
     `CREATE INDEX IF NOT EXISTS idx_documents_owner ON documents(owner_id)`,
     `CREATE INDEX IF NOT EXISTS idx_acl_principal ON acl_entries(principal)`,
     `CREATE INDEX IF NOT EXISTS idx_documents_expires ON documents(expires_at) WHERE expires_at IS NOT NULL`,
@@ -354,9 +355,28 @@ export function getDocumentByAutomergeId(
 }
 
 export function deleteDocument(id: string): boolean {
-  const stmt = getDb().prepare("DELETE FROM documents WHERE id = ?");
-  const result = stmt.run(id);
-  return result.changes > 0;
+  const db = getDb();
+
+  const transaction = db.transaction(() => {
+    const blobHashes = db
+      .prepare(
+        "SELECT blob_hash FROM document_blob_claims WHERE document_id = ?",
+      )
+      .all(id) as { blob_hash: string }[];
+
+    const stmt = db.prepare("DELETE FROM documents WHERE id = ?");
+    const result = stmt.run(id);
+
+    if (result.changes > 0) {
+      for (const row of blobHashes) {
+        updateBlobReleasedStatus(row.blob_hash);
+      }
+    }
+
+    return result.changes > 0;
+  });
+
+  return transaction();
 }
 
 export function getDocumentsByOwner(ownerId: string): DocumentMetadata[] {
@@ -415,16 +435,20 @@ function rowToDocument(row: Record<string, unknown>): DocumentMetadata {
 export function setDocumentACL(documentId: string, acl: ACLEntry[]): void {
   const db = getDb();
 
-  db.prepare("DELETE FROM acl_entries WHERE document_id = ?").run(documentId);
+  const transaction = db.transaction(() => {
+    db.prepare("DELETE FROM acl_entries WHERE document_id = ?").run(documentId);
 
-  const insertStmt = db.prepare(`
-    INSERT INTO acl_entries (document_id, principal, permission)
-    VALUES (?, ?, ?)
-  `);
+    const insertStmt = db.prepare(`
+      INSERT INTO acl_entries (document_id, principal, permission)
+      VALUES (?, ?, ?)
+    `);
 
-  for (const entry of acl) {
-    insertStmt.run(documentId, entry.principal, entry.permission);
-  }
+    for (const entry of acl) {
+      insertStmt.run(documentId, entry.principal, entry.permission);
+    }
+  });
+
+  transaction();
 }
 
 export function getDocumentACL(documentId: string): ACLEntry[] {
@@ -608,17 +632,23 @@ export function getBlobClaim(
 }
 
 export function deleteBlobClaim(blobHash: string, userId: string): boolean {
-  const stmt = getDb().prepare(
-    "DELETE FROM blob_claims WHERE blob_hash = ? AND user_id = ?",
-  );
-  const result = stmt.run(blobHash, userId);
+  const db = getDb();
 
-  if (result.changes > 0) {
-    // Check if blob has any remaining claims
-    updateBlobReleasedStatus(blobHash);
-  }
+  const transaction = db.transaction(() => {
+    const stmt = db.prepare(
+      "DELETE FROM blob_claims WHERE blob_hash = ? AND user_id = ?",
+    );
+    const result = stmt.run(blobHash, userId);
 
-  return result.changes > 0;
+    if (result.changes > 0) {
+      // Check if blob has any remaining claims
+      updateBlobReleasedStatus(blobHash);
+    }
+
+    return result.changes > 0;
+  });
+
+  return transaction();
 }
 
 export function getUserBlobClaims(userId: string): BlobClaim[] {
@@ -704,17 +734,23 @@ export function deleteDocumentBlobClaim(
   blobHash: string,
   documentId: string,
 ): boolean {
-  const stmt = getDb().prepare(
-    "DELETE FROM document_blob_claims WHERE blob_hash = ? AND document_id = ?",
-  );
-  const result = stmt.run(blobHash, documentId);
+  const db = getDb();
 
-  if (result.changes > 0) {
-    // Check if blob has any remaining claims
-    updateBlobReleasedStatus(blobHash);
-  }
+  const transaction = db.transaction(() => {
+    const stmt = db.prepare(
+      "DELETE FROM document_blob_claims WHERE blob_hash = ? AND document_id = ?",
+    );
+    const result = stmt.run(blobHash, documentId);
 
-  return result.changes > 0;
+    if (result.changes > 0) {
+      // Check if blob has any remaining claims
+      updateBlobReleasedStatus(blobHash);
+    }
+
+    return result.changes > 0;
+  });
+
+  return transaction();
 }
 
 export function getDocumentBlobClaims(documentId: string): DocumentBlobClaim[] {

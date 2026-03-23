@@ -50,6 +50,10 @@ OIDC_REDIRECT_URI=http://localhost:4151/api/v1/auth/callback
 # Storage
 DATA_DIR=./data
 
+# Optional: Comma-separated additional browser origins for CORS
+# (BASE_URL origin is always allowed)
+# CORS_ALLOWED_ORIGINS=http://localhost:5173,http://localhost:3000
+
 # Optional: Override default quotas
 # DEFAULT_MAX_DOCUMENTS=10000
 # DEFAULT_MAX_DOCUMENT_SIZE=10485760
@@ -79,7 +83,7 @@ src/
 ├── auth/             # Authentication (OIDC, tokens)
 ├── api/              # REST API routes
 ├── sync/             # WebSocket sync handler
-├── storage/          # Database and file storage
+├── storage/          # Metadata DB + blob file storage
 └── lib/              # Shared utilities (ACL, rate limiting, etc.)
 ```
 
@@ -115,7 +119,10 @@ bun run format
 
 ## Database
 
-SQLite is used for metadata storage. The database file is stored at `{DATA_DIR}/ratatoskr.db`.
+SQLite is used for metadata and sync storage:
+
+- `{DATA_DIR}/ratatoskr.db` for metadata
+- `{DATA_DIR}/automerge.db` for Automerge document state
 
 ### Migrations
 
