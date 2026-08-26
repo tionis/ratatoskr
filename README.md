@@ -1,5 +1,7 @@
 # Ratatoskr
 
+> NOTE: This didn't pan out like I wanted and has many serious issues. I've decided to build fully distributed apps via trystero and more classical apps with a more classical backend using automerge instead. This is now just an archive.
+
 Ratatoskr is an automerge-repo sync server with authentication and per-document permissions. It provides shared backend infrastructure for multiple web applications that need real-time collaborative document synchronization.
 
 ## Features
